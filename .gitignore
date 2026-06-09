@@ -1,0 +1,19 @@
+### IntelliJ IDEA ###
+.idea
+*.iws
+*.iml
+*.ipr
+
+
+### VS Code ###
+.vscode/
+
+### Mac OS ###
+.DS_Store
+
+# Runtime state generated while using super-flow-kit locally
+/.sfk/
+/docs/super-flow-kit/
+
+# CocoIndex Code (ccc)
+/.cocoindex_code/
