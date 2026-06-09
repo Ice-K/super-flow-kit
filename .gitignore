@@ -11,6 +11,10 @@
 ### Mac OS ###
 .DS_Store
 
+# Python
+__pycache__/
+*.py[cod]
+
 # Runtime state generated while using super-flow-kit locally
 /.sfk/
 /docs/super-flow-kit/
