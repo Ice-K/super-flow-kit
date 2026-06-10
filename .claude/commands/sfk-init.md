@@ -24,5 +24,6 @@ bash scripts/sfk-init.sh $ARGUMENTS
 - 如果项目已初始化，不要覆盖已有状态。
 - 初始化完成后，建议用户创建第一个模块：
   ```text
-  /sfk-module create 用户认证 --id user-auth
+  /sfk-module create 用户管理
   ```
+  创建模块时会在交互中推荐 `moduleId`；无法可靠推荐时，再提示用户补充 `--id`。

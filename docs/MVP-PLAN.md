@@ -8,7 +8,7 @@
 
 ```text
 /sfk-init
-/sfk-module create 用户认证 --id user-auth
+/sfk-module create 用户管理
 /sfk-req 开发用户登录功能
 /sfk-status
 ```
@@ -65,25 +65,30 @@ templates/requirement.md
 
 1. 检查项目和当前模块状态。
 2. 单题推进澄清关键问题。
-3. 每题可单选、多选或自由输入，必须保留“其他，我自己说明”。
+3. 每题可单选、多选或自由输入；交互控件已有 Type something / 自定义输入能力，不额外添加自定义说明选项。
 4. 澄清后总结。
 5. 基于总结提供 3–5 个方案。
-6. 用户确认方案后生成需求分析草稿。
-7. 保存文档到 `docs/super-flow-kit/{moduleId}/...`。
-8. 草稿状态写入：`status: in_progress`、`quality: draft`。
-9. 用户再次确认后，更新为 `status: done`、`quality: confirmed`。
+6. 用户确认方案后生成或更新需求分析草稿。
+7. 如果当前模块没有需求文档，创建新的时间戳文档；如果已有主需求文档，默认合并更新该文档。
+8. 保存文档到 `docs/super-flow-kit/{moduleId}/...`，后续补充需求必须追加“变更记录”。
+9. 草稿状态写入：`status: in_progress`、`quality: draft`。
+10. 用户再次确认后，更新为 `status: done`、`quality: confirmed`。
+11. 每次新增、编辑或合并产出物文档后，必须触发通用文档检查；检查器应自行修复标题编号、文档信息质量状态、确认后的变更记录负责人等可确定问题，并输出检查结果。
 
 ## 脚本级验证命令
 
 ```bash
 python scripts/sfk.py init
 python scripts/sfk.py status
-python scripts/sfk.py module create 用户认证 --id user-auth
+python scripts/sfk.py module create 用户管理 --id user-management
 python scripts/sfk.py module list
 python scripts/sfk.py module status
 python scripts/sfk.py config show
 python scripts/sfk.py config set pluginName flow
 python scripts/sfk.py config set userName 阿杰
+python scripts/sfk.py artifact current requirement
+python scripts/sfk.py artifact draft requirement docs/super-flow-kit/user-management/<需求文档>.md
+python scripts/sfk.py artifact confirm requirement
 python scripts/sfk.py status
 ```
 

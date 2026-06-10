@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -68,6 +69,21 @@ def rel(path: Path) -> str:
     return value
 
 
+def normalize_artifact_file(value: str) -> str:
+    raw = value.strip()
+    if not raw:
+        raise SfkError("产出物路径不能为空。")
+    candidate = Path(raw)
+    if not candidate.is_absolute():
+        candidate = root() / candidate
+    project_root = root().resolve()
+    resolved = candidate.resolve(strict=False)
+    try:
+        return resolved.relative_to(project_root).as_posix()
+    except ValueError as exc:
+        raise SfkError("产出物路径必须位于当前项目根目录内，请使用项目相对路径。") from exc
+
+
 def index_path() -> Path:
     return root() / ".sfk" / "index.json"
 
@@ -78,6 +94,129 @@ def state_path(module_id: str) -> Path:
 
 def docs_dir(module_id: str) -> Path:
     return root() / "docs" / "super-flow-kit" / module_id
+
+
+def current_owner(index: dict[str, Any]) -> str:
+    try:
+        result = subprocess.run(
+            ["git", "config", "user.name"],
+            cwd=root(),
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+        git_name = result.stdout.strip()
+        if result.returncode == 0 and git_name:
+            return git_name
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return str(index.get("globalConfig", {}).get("userName") or DEFAULT_CONFIG["userName"])
+
+
+def fill_latest_change_owner_in_lines(lines: list[str], owner: str) -> bool:
+    for index in range(len(lines) - 1, -1, -1):
+        line = lines[index]
+        if not line.startswith("|") or "---" in line:
+            continue
+        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        if len(cells) < 3 or cells[0] in {"时间", "Time"}:
+            continue
+        if cells[-1] in {"待确认", "<负责人或待确认>", ""}:
+            cells[-1] = owner
+            lines[index] = "| " + " | ".join(cells) + " |"
+            return True
+        break
+    return False
+
+
+def fill_latest_change_owner(file_path: str, owner: str) -> bool:
+    path = root() / file_path
+    if not path.exists():
+        return False
+    text = path.read_text(encoding="utf-8")
+    lines = text.splitlines()
+    changed = fill_latest_change_owner_in_lines(lines, owner)
+    if changed:
+        trailing_newline = "\n" if text.endswith("\n") else ""
+        path.write_text("\n".join(lines) + trailing_newline, encoding="utf-8")
+    return changed
+
+
+def renumber_markdown_headings(lines: list[str]) -> tuple[list[str], bool]:
+    counters: dict[int, int] = {}
+    changed = False
+    updated: list[str] = []
+    heading_re = re.compile(r"^(#{2,6})\s+(\d+(?:\.\d+)*)([.、]?)\s+(.+)$")
+    for line in lines:
+        match = heading_re.match(line)
+        if not match:
+            updated.append(line)
+            continue
+        hashes, old_number, punctuation, title = match.groups()
+        level = len(hashes)
+        if level == 2:
+            counters = {2: counters.get(2, 0) + 1}
+            expected = str(counters[2])
+        else:
+            parent = counters.get(level - 1)
+            if parent is None:
+                updated.append(line)
+                continue
+            for key in list(counters):
+                if key > level:
+                    counters.pop(key, None)
+            counters[level] = counters.get(level, 0) + 1
+            parts = [str(counters[i]) for i in range(2, level + 1) if i in counters]
+            expected = ".".join(parts)
+        expected_text = f"{expected}." if level == 2 else expected
+        current_text = old_number + punctuation
+        if current_text != expected_text:
+            line = f"{hashes} {expected_text} {title}"
+            changed = True
+        updated.append(line)
+    return updated, changed
+
+
+def replace_doc_info_value(lines: list[str], field: str, value: str) -> bool:
+    changed = False
+    pattern = re.compile(rf"^(\|\s*{re.escape(field)}\s*\|\s*)(.*?)(\s*\|)$")
+    for index, line in enumerate(lines):
+        match = pattern.match(line)
+        if not match:
+            continue
+        new_line = f"{match.group(1)}{value}{match.group(3)}"
+        if new_line != line:
+            lines[index] = new_line
+            changed = True
+        break
+    return changed
+
+
+def check_artifact_document(file_path: str, phase: str, artifact: dict[str, Any], owner: str | None = None) -> list[str]:
+    path = root() / file_path
+    if not path.exists() or path.suffix.lower() != ".md":
+        return []
+    text = path.read_text(encoding="utf-8")
+    lines = text.splitlines()
+    fixes: list[str] = []
+
+    lines, heading_changed = renumber_markdown_headings(lines)
+    if heading_changed:
+        fixes.append("修复 Markdown 标题编号")
+
+    quality = artifact.get("quality")
+    if quality in {"draft", "confirmed"} and replace_doc_info_value(lines, "质量状态", str(quality)):
+        fixes.append("同步文档质量状态")
+
+    if artifact.get("status") == "done" and artifact.get("quality") == "confirmed" and owner:
+        if fill_latest_change_owner_in_lines(lines, owner):
+            fixes.append("回填变更记录负责人")
+
+    if fixes:
+        trailing_newline = "\n" if text.endswith("\n") else ""
+        path.write_text("\n".join(lines) + trailing_newline, encoding="utf-8")
+    return fixes
 
 
 def read_json(path: Path) -> dict[str, Any]:
@@ -129,7 +268,10 @@ def suggest_module_id(display_name: str) -> str:
     candidate = re.sub(r"[^A-Za-z0-9]+", "-", text).strip("-").lower()
     if candidate and MODULE_ID_RE.fullmatch(candidate):
         return candidate
-    raise SfkError("无法可靠生成 moduleId，请使用 --id 显式指定，例如：--id user-auth")
+    raise SfkError(
+        "脚本层无法可靠生成 moduleId。请通过 /sfk-module create <名称> 让 Claude 在交互中推荐，"
+        "或使用 --id 显式指定，例如：--id user-management"
+    )
 
 
 def phase_template() -> dict[str, Any]:
@@ -203,7 +345,8 @@ def command_init(args: argparse.Namespace) -> None:
     print("  - .sfk/index.json")
     print("  - .sfk/modules/")
     print("  - docs/super-flow-kit/")
-    print("下一步建议：/sfk-module create 用户认证 --id user-auth")
+    print("下一步建议：/sfk-module create 用户管理")
+    print("提示：创建模块时会在交互中推荐 moduleId；无法可靠推荐时再补充 --id。")
 
 
 def module_create(args: argparse.Namespace) -> None:
@@ -211,6 +354,7 @@ def module_create(args: argparse.Namespace) -> None:
     display_name = " ".join(args.name).strip()
     if not display_name:
         raise SfkError("模块名称不能为空。")
+    auto_suggested = args.id is None
     module_id = args.id or suggest_module_id(display_name)
     validate_module_id(module_id)
     modules = index.setdefault("modules", {})
@@ -240,7 +384,10 @@ def module_create(args: argparse.Namespace) -> None:
     write_json(index_path(), index)
 
     print(f"✅ 已创建模块：【{display_name}】")
-    print(f"moduleId：{module_id}")
+    if auto_suggested:
+        print(f"moduleId：{module_id}（脚本自动生成）")
+    else:
+        print(f"moduleId：{module_id}")
     print(f"状态文件：{rel(state_path(module_id))}")
     print(f"产出物目录：{rel(docs_dir(module_id))}/")
     print("下一步建议：/sfk-req <需求描述>")
@@ -252,7 +399,8 @@ def module_list(_: argparse.Namespace) -> None:
     current = index.get("currentModule")
     if not modules:
         print("当前还没有模块。")
-        print("下一步建议：/sfk-module create 用户认证 --id user-auth")
+        print("下一步建议：/sfk-module create 用户管理")
+        print("提示：创建模块时会在交互中推荐 moduleId；无法可靠推荐时再补充 --id。")
         return
     print("📦 模块列表：")
     for module_id, item in modules.items():
@@ -312,7 +460,8 @@ def render_status(_: argparse.Namespace) -> None:
     current = index.get("currentModule")
     if not modules:
         print("\n当前项目已初始化，但还没有模块。")
-        print("下一步建议：/sfk-module create 用户认证 --id user-auth")
+        print("下一步建议：/sfk-module create 用户管理")
+        print("提示：创建模块时会在交互中推荐 moduleId；无法可靠推荐时再补充 --id。")
         return
     print(f"当前模块：{current}")
     print("\n📦 模块列表：")
@@ -353,6 +502,26 @@ def config_set(args: argparse.Namespace) -> None:
     print(f"✅ 已更新配置：{key} = {value.strip()}")
 
 
+def artifact_current(args: argparse.Namespace) -> None:
+    _, state, module_id = require_current_state()
+    phase = args.phase
+    if phase not in dict(PHASES):
+        raise SfkError(f"未知阶段：{phase}")
+    artifact = state.get("artifacts", {}).get(phase, {})
+    files = artifact.get("files") or []
+    current_file = files[-1] if files else None
+    print(json.dumps({
+        "moduleId": module_id,
+        "phase": phase,
+        "status": artifact.get("status", "pending"),
+        "quality": artifact.get("quality"),
+        "currentFile": current_file,
+        "files": files,
+        "updatedAt": artifact.get("updatedAt"),
+        "confirmedAt": artifact.get("confirmedAt"),
+    }, ensure_ascii=False, indent=2))
+
+
 def artifact_update(args: argparse.Namespace, confirmed: bool) -> None:
     index, state, module_id = require_current_state()
     phase = args.phase
@@ -361,16 +530,20 @@ def artifact_update(args: argparse.Namespace, confirmed: bool) -> None:
     artifact = state.setdefault("artifacts", {}).setdefault(phase, {})
     timestamp = now_iso()
     if confirmed:
+        files = artifact.get("files") or []
+        if not files:
+            raise SfkError("没有可确认的阶段产出物。请先保存草稿后再确认。")
+        owner = current_owner(index)
         artifact["status"] = "done"
         artifact["quality"] = "confirmed"
         artifact["confirmedAt"] = timestamp
+        artifact["owner"] = owner
         artifact["version"] = artifact.get("version") or "1.0.0"
         action = f"confirm_{phase}"
         detail = f"确认阶段产出物：{phase}"
     else:
-        file_path = args.file
-        if not file_path:
-            raise SfkError("草稿状态更新需要提供产出物路径。")
+        owner = None
+        file_path = normalize_artifact_file(args.file)
         artifact["status"] = "in_progress"
         artifact["quality"] = "draft"
         files = artifact.setdefault("files", [])
@@ -382,12 +555,15 @@ def artifact_update(args: argparse.Namespace, confirmed: bool) -> None:
         detail = f"保存阶段草稿：{phase}"
     artifact["updatedAt"] = timestamp
     artifact.setdefault("owner", None)
+    check_fixes: list[str] = []
+    for artifact_file in artifact.get("files", []):
+        check_fixes.extend(check_artifact_document(artifact_file, phase, artifact, owner))
     state["currentPhase"] = phase
     state.setdefault("module", {})["updatedAt"] = timestamp
     state.setdefault("history", []).append({
         "action": action,
         "timestamp": timestamp,
-        "user": None,
+        "user": owner,
         "detail": detail,
         "files": artifact.get("files", []),
     })
@@ -400,6 +576,22 @@ def artifact_update(args: argparse.Namespace, confirmed: bool) -> None:
     print(f"阶段：{phase}")
     print(f"status：{artifact.get('status')}")
     print(f"quality：{artifact.get('quality')}")
+    if check_fixes:
+        print("documentCheck：fixed")
+        for fix in sorted(set(check_fixes)):
+            print(f"  - {fix}")
+    else:
+        print("documentCheck：passed")
+    if confirmed:
+        print(f"owner：{artifact.get('owner')}")
+
+
+def tui_select(args: argparse.Namespace) -> None:
+    import sfk_tui
+
+    code = sfk_tui.run_select(args)
+    if code != 0:
+        raise SfkError("TUI 选择命令执行失败。")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -439,6 +631,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_artifact = sub.add_parser("artifact")
     artifact_sub = p_artifact.add_subparsers(dest="artifact_command", required=True)
+    p_current = artifact_sub.add_parser("current")
+    p_current.add_argument("phase")
+    p_current.set_defaults(func=artifact_current)
     p_draft = artifact_sub.add_parser("draft")
     p_draft.add_argument("phase")
     p_draft.add_argument("file")
@@ -446,6 +641,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_confirm = artifact_sub.add_parser("confirm")
     p_confirm.add_argument("phase")
     p_confirm.set_defaults(func=lambda args: artifact_update(args, confirmed=True))
+
+    p_tui = sub.add_parser("tui")
+    tui_sub = p_tui.add_subparsers(dest="tui_command", required=True)
+    p_select = tui_sub.add_parser("select")
+    p_select.add_argument("--title", required=True)
+    p_select.add_argument("--description")
+    p_select.add_argument("--mode", choices=["single", "multi"], default="single")
+    p_select.add_argument("--option", action="append", required=True, help="选项，格式为 key=label，可重复。")
+    p_select.add_argument("--default", action="append", help="默认选中的选项 key，可重复。")
+    p_select.set_defaults(func=tui_select)
 
     return parser
 

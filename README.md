@@ -15,9 +15,10 @@ v0.1 已实现：
 - `/sfk` — 唤醒插件并展示当前状态。
 - `/sfk-init` — 初始化 `.sfk/` 状态目录和 `docs/super-flow-kit/` 产出物目录。
 - `/sfk-status` — 查看项目和当前模块工作流看板。
-- `/sfk-module create/list/switch/status` — 管理功能模块，`create` 支持 `--id`。
+- `/sfk-module create/list/switch/status` — 管理功能模块；`create` 在 slash command 交互中可智能推荐 `moduleId`，`--id` 可显式覆盖。
 - `/sfk-config` — 查看配置，并支持设置 `pluginName` 和 `userName`。
-- `/sfk-req` — 进入需求分析流程，指导 Claude 单题澄清、总结、提供方案、生成草稿并等待用户确认。
+- `/sfk-req` — 进入需求分析流程，指导 Claude 单题澄清、展示问题与选择汇总、总结确认、提供方案、生成草稿并等待用户确认。
+- `scripts/sfk.py tui select` — 通用键盘选择底层能力，支持单选/多选；交互终端中可用上下键、空格和 Enter，非交互环境会安全降级。
 
 v0.1 暂未实现：
 
@@ -48,7 +49,7 @@ v0.1 只完整实现 **需求分析** 阶段。后续阶段已在规格和状态
 
 ```text
 /sfk-init
-/sfk-module create 用户认证 --id user-auth
+/sfk-module create 用户管理
 /sfk-config set pluginName flow
 /sfk-config set userName 阿杰
 /sfk
@@ -56,17 +57,23 @@ v0.1 只完整实现 **需求分析** 阶段。后续阶段已在规格和状态
 /sfk-req 开发用户登录功能
 ```
 
+在 slash command 交互中，`/sfk-module create 用户管理` 会先由 Claude 根据语义推荐合法的 `moduleId`（如 `user-management`），再调用底层脚本；如无法可靠推荐，可使用 `--id` 显式指定。
+
 `/sfk-req` 的推荐交互流程：
 
 ```text
 单题推进澄清关键问题
+→ 展示所有问题与用户选择
 → 总结已确认信息
 → 基于总结提供 3–5 个方案
 → 用户选择、组合或自定义方案
-→ 生成需求分析草稿
-→ 用户再次确认
+→ 总结确认：确认 / 修改某题 / 返回上一题 / 全部重选 / 取消
+→ 生成或更新需求分析草稿
+→ 草稿确认：确认完成 / 继续修改 / 返回总结 / 暂存草稿 / 取消
 → 标记 done / confirmed
 ```
+
+第一次执行 `/sfk-req` 会创建当前模块的主需求分析文档。后续再次执行 `/sfk-req` 时，默认会把补充内容合并到这份主文档，并在“变更记录”中追加记录；只有用户明确要求新建版本或另存新文档时，才会创建新的时间戳文件。
 
 ## 项目结构
 
@@ -82,6 +89,7 @@ v0.1 只完整实现 **需求分析** 阶段。后续阶段已在规格和状态
 
 scripts/
 ├── sfk.py
+├── sfk_tui.py
 ├── sfk-init.sh
 ├── sfk-status.sh
 ├── sfk-module.sh
@@ -110,7 +118,7 @@ CLAUDE.md                  # Claude Code 项目指导
 docs/
 └── super-flow-kit/
     └── {moduleId}/
-        └── yyyyMMddHHmmss-{moduleId}-需求分析.md
+        └── yyyyMMddHHmmss-{moduleId}-需求分析.md  # 主需求文档；显式新版本时会新增文件
 ```
 
 这些运行时状态默认被 `.gitignore` 忽略：
@@ -124,17 +132,19 @@ docs/
 
 本项目当前不需要安装 npm 依赖，也没有 build/lint/test 脚本。核心状态工具使用 Python 标准库实现。
 
-可以运行以下命令进行脚本级验证：
+可以运行以下命令进行脚本级验证。注意：直接运行 `python scripts/sfk.py module create ...` 时没有 Claude 语义推荐能力，中文名称建议显式提供 `--id`。
 
 ```bash
 python scripts/sfk.py init
 python scripts/sfk.py status
-python scripts/sfk.py module create 用户认证 --id user-auth
+python scripts/sfk.py module create 用户管理 --id user-management
 python scripts/sfk.py module list
 python scripts/sfk.py module status
 python scripts/sfk.py config show
 python scripts/sfk.py config set pluginName flow
 python scripts/sfk.py config set userName 阿杰
+python scripts/sfk.py artifact current requirement
+python scripts/sfk.py tui select --title "选择方案" --mode single --option mvp="MVP 方案" --option custom="其他"
 python scripts/sfk.py status
 ```
 
@@ -159,6 +169,9 @@ rm -rf .sfk docs/super-flow-kit
 - 产出物质量：`draft`、`confirmed`
 - 草稿保存后：`status = in_progress`，`quality = draft`
 - 用户明确确认后：`status = done`，`quality = confirmed`
+- `artifacts.requirement.files[-1]` 是当前主需求文档；重复执行 `/sfk-req` 默认更新该文件并追加变更记录。
+- `/sfk-req` 在写入草稿前会展示所有问题与用户选择，并提供确认、修改、回退、重选和取消分支。
+- `scripts/sfk.py tui select` 是无状态的通用交互选择能力；slash command 仍保留文本/编号选择作为兜底。
 
 ## 规格文档
 

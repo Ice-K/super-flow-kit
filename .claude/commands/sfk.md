@@ -13,7 +13,7 @@ argument-hint: "[操作]"
    ```
 2. 根据脚本输出，用简体中文向用户展示当前项目状态。
 3. 如果项目未初始化，提示用户执行 `/sfk-init`。
-4. 如果项目已初始化但没有模块，提示用户执行 `/sfk-module create <名称> --id <moduleId>`。
+4. 如果项目已初始化但没有模块，提示用户执行 `/sfk-module create <名称>`；创建模块时 sfk 会在交互中推荐 `moduleId`，无法可靠推荐时再提示补充 `--id`。
 5. 如果已有当前模块，给出下一步建议：
    - `/sfk-status`
    - `/sfk-module status`
