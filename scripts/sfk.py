@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -30,6 +31,23 @@ PHASES = [
     ("testing", "功能测试"),
     ("deployment", "部署上线"),
 ]
+PHASE_NAMES = dict(PHASES)
+PHASE_COMMANDS = {
+    "requirement": "/sfk-req",
+    "ui_design": "/sfk-ui",
+    "system_design": "/sfk-design",
+    "development": "/sfk-dev",
+    "testing": "/sfk-test",
+    "deployment": "/sfk-deploy",
+}
+PHASE_DEPENDENCIES = {
+    "requirement": {"hard": [], "soft": []},
+    "ui_design": {"hard": [], "soft": ["requirement"]},
+    "system_design": {"hard": ["requirement"], "soft": []},
+    "development": {"hard": ["requirement", "system_design"], "soft": ["ui_design"]},
+    "testing": {"hard": ["requirement"], "soft": ["development", "system_design"]},
+    "deployment": {"hard": ["testing"], "soft": ["system_design"]},
+}
 DEFAULT_CONFIG = {
     "pluginName": "sfk",
     "userName": "小主",
@@ -47,6 +65,30 @@ COMMON_SLUGS = {
     "订单模块": "order-module",
     "订单": "order",
 }
+SKIP_DISCOVERY_DIRS = {
+    ".git",
+    ".sfk",
+    "node_modules",
+    "dist",
+    "build",
+    "coverage",
+    ".venv",
+    "venv",
+    "__pycache__",
+}
+MANIFEST_NAMES = {
+    "package.json",
+    "pyproject.toml",
+    "Cargo.toml",
+    "go.mod",
+    "pom.xml",
+    "build.gradle",
+    "tsconfig.json",
+    "angular.json",
+}
+UI_EXTENSIONS = {".tsx", ".jsx", ".vue", ".svelte", ".html", ".css", ".scss", ".less"}
+CODE_EXTENSIONS = {".py", ".js", ".ts", ".tsx", ".jsx", ".vue", ".svelte", ".go", ".rs", ".java", ".kt", ".cs", ".php", ".rb"}
+UI_DIR_PARTS = {"app", "pages", "components", "layouts", "views", "routes", "styles", "assets", "public", "ui", "design"}
 
 
 class SfkError(Exception):
@@ -256,6 +298,317 @@ def require_current_state(index: dict[str, Any] | None = None) -> tuple[dict[str
     return index, state, module_id
 
 
+def validate_phase(phase_id: str) -> None:
+    if phase_id not in PHASE_NAMES:
+        raise SfkError(f"未知阶段：{phase_id}")
+
+
+def artifact_files_health(files: list[str]) -> dict[str, Any]:
+    normalized = [str(item).replace("\\", "/") for item in files if str(item).strip()]
+    missing: list[str] = []
+    empty: list[str] = []
+    usable: list[str] = []
+    for file_path in normalized:
+        path = root() / file_path
+        if not path.exists() or not path.is_file():
+            missing.append(file_path)
+            continue
+        if path.stat().st_size <= 0:
+            empty.append(file_path)
+            continue
+        usable.append(file_path)
+    return {
+        "hasFiles": bool(normalized),
+        "hasUsableFile": bool(usable),
+        "files": normalized,
+        "usable": usable,
+        "missing": missing,
+        "empty": empty,
+    }
+
+
+def dependency_status(state: dict[str, Any], phase_id: str) -> dict[str, Any]:
+    validate_phase(phase_id)
+    artifact = state.get("artifacts", {}).get(phase_id, {})
+    status = artifact.get("status", "pending")
+    quality = artifact.get("quality")
+    files = artifact.get("files") or []
+    health = artifact_files_health(files)
+    reason = "satisfied"
+    satisfied = True
+    if not files:
+        reason = "missing"
+        satisfied = False
+    elif status == "in_progress" or quality == "draft":
+        reason = "draft"
+        satisfied = False
+    elif status != "done":
+        reason = "missing"
+        satisfied = False
+    elif quality != "confirmed":
+        reason = "not_confirmed"
+        satisfied = False
+    elif not health["hasUsableFile"]:
+        reason = "file_missing" if health["missing"] else "file_empty"
+        satisfied = False
+    return {
+        "phase": phase_id,
+        "phaseName": PHASE_NAMES[phase_id],
+        "status": status,
+        "quality": quality,
+        "reason": reason,
+        "satisfied": satisfied,
+        "files": health["files"],
+        "missingFiles": health["missing"],
+        "emptyFiles": health["empty"],
+    }
+
+
+def artifact_is_satisfied(artifact: dict[str, Any]) -> bool:
+    return (
+        artifact.get("status") == "done"
+        and artifact.get("quality") == "confirmed"
+        and artifact_files_health(artifact.get("files") or [])["hasUsableFile"]
+    )
+
+
+def check_phase_dependencies(state: dict[str, Any], target_phase: str) -> dict[str, Any]:
+    validate_phase(target_phase)
+    dependencies = PHASE_DEPENDENCIES.get(target_phase, {"hard": [], "soft": []})
+    hard_missing = [
+        item for item in (dependency_status(state, phase) for phase in dependencies.get("hard", []))
+        if not item["satisfied"]
+    ]
+    soft_missing = [
+        item for item in (dependency_status(state, phase) for phase in dependencies.get("soft", []))
+        if not item["satisfied"]
+    ]
+    warnings: list[str] = []
+    for item in hard_missing:
+        warnings.append(f"{PHASE_NAMES[target_phase]} 需要先确认 {item['phaseName']} 产出物；当前状态：{item['reason']}。")
+    for item in soft_missing:
+        warnings.append(f"{PHASE_NAMES[target_phase]} 建议先确认 {item['phaseName']} 产出物；当前可继续，但需要记录假设。")
+    return {
+        "phase": target_phase,
+        "phaseName": PHASE_NAMES[target_phase],
+        "blocked": bool(hard_missing),
+        "canContinue": not hard_missing,
+        "hard": dependencies.get("hard", []),
+        "soft": dependencies.get("soft", []),
+        "hardMissing": hard_missing,
+        "softMissing": soft_missing,
+        "warnings": warnings,
+    }
+
+
+def should_skip_discovery_dir(dir_path: Path) -> bool:
+    parts = set(dir_path.relative_to(root()).parts) if dir_path != root() else set()
+    if parts & SKIP_DISCOVERY_DIRS:
+        return True
+    rel_parts = dir_path.relative_to(root()).parts if dir_path != root() else ()
+    return len(rel_parts) >= 2 and rel_parts[0] == ".claude" and rel_parts[1] == "worktrees"
+
+
+def iter_project_files(max_files: int = 5000) -> tuple[list[Path], bool]:
+    files: list[Path] = []
+    truncated = False
+    for current_dir, dir_names, file_names in os.walk(root()):
+        current_path = Path(current_dir)
+        dir_names[:] = [name for name in dir_names if not should_skip_discovery_dir(current_path / name)]
+        for file_name in file_names:
+            path = current_path / file_name
+            files.append(path)
+            if len(files) >= max_files:
+                return files, True
+    return files, truncated
+
+
+def is_business_doc(file_path: str) -> bool:
+    lower = file_path.lower()
+    name = Path(file_path).name.lower()
+    if lower.startswith("docs/super-flow-kit/"):
+        return False
+    if name == "readme.md":
+        return True
+    if lower.startswith("docs/") and lower.endswith(".md"):
+        return True
+    return bool(re.match(r"^(product|requirements?|spec|prd).*\.md$", name))
+
+
+def is_manifest(file_path: str) -> bool:
+    name = Path(file_path).name
+    lower = name.lower()
+    return name in MANIFEST_NAMES or lower.startswith(("vite.config", "next.config", "nuxt.config", "svelte.config"))
+
+
+def ui_framework_hints(file_path: str) -> list[str]:
+    lower = file_path.lower()
+    hints: list[str] = []
+    patterns = {
+        "Tailwind CSS": ["tailwind.config", "@tailwind"],
+        "Next.js": ["next.config", "app/", "pages/"],
+        "Vue": [".vue"],
+        "Svelte": [".svelte", "svelte.config"],
+        "CSS Modules": [".module.css", ".module.scss"],
+        "SCSS": [".scss"],
+    }
+    for hint, values in patterns.items():
+        if any(value in lower for value in values):
+            hints.append(hint)
+    return hints
+
+
+def discover_project_context(phase: str) -> dict[str, Any]:
+    validate_phase(phase)
+    index, state, module_id = require_current_state()
+    files, truncated = iter_project_files()
+    manifests: list[str] = []
+    business_docs: list[str] = []
+    source_dirs: set[str] = set()
+    code_files: list[str] = []
+    sfk_artifacts: list[str] = []
+    route_dirs: set[str] = set()
+    component_dirs: set[str] = set()
+    style_files: list[str] = []
+    design_system_files: list[str] = []
+    representative_files: list[str] = []
+    framework_hints: set[str] = set()
+
+    for path in files:
+        file_path = rel(path)
+        lower = file_path.lower()
+        parts = file_path.split("/")
+        name = path.name
+        suffix = path.suffix.lower()
+
+        if lower.startswith("docs/super-flow-kit/"):
+            sfk_artifacts.append(file_path)
+            continue
+        if is_manifest(file_path):
+            manifests.append(file_path)
+        if is_business_doc(file_path):
+            business_docs.append(file_path)
+        if parts and parts[0] in {"src", "app", "pages", "components", "tests", "test"}:
+            source_dirs.add(parts[0])
+        if suffix in CODE_EXTENSIONS:
+            code_files.append(file_path)
+        if any(part in {"app", "pages", "views", "routes"} for part in parts):
+            route_dirs.add("/".join(parts[:2]) if len(parts) > 1 else parts[0])
+        if any(part in {"components", "ui"} for part in parts):
+            component_dirs.add("/".join(parts[:2]) if len(parts) > 1 else parts[0])
+        if suffix in {".css", ".scss", ".less"}:
+            style_files.append(file_path)
+        if "tailwind.config" in lower or "theme" in lower or "tokens" in lower or "design-system" in lower or "globals.css" in lower:
+            design_system_files.append(file_path)
+        if suffix in UI_EXTENSIONS and (set(parts) & UI_DIR_PARTS):
+            representative_files.append(file_path)
+        for hint in ui_framework_hints(file_path):
+            framework_hints.add(hint)
+
+    has_ui_code = bool(route_dirs or component_dirs or style_files or design_system_files or representative_files)
+    if has_ui_code:
+        project_kind = "existing_ui_code"
+    elif manifests or code_files:
+        project_kind = "existing_code"
+    elif business_docs:
+        project_kind = "existing_business_docs"
+    else:
+        project_kind = "new_project"
+
+    warnings: list[str] = []
+    if truncated:
+        warnings.append("scan_truncated")
+
+    def limited(items: list[str] | set[str], limit: int = 50) -> list[str]:
+        return sorted(items)[:limit]
+
+    return {
+        "moduleId": module_id,
+        "phase": phase,
+        "phaseName": PHASE_NAMES[phase],
+        "projectKind": project_kind,
+        "evidence": {
+            "manifests": limited(manifests),
+            "businessDocs": limited(business_docs),
+            "sourceDirs": limited(source_dirs),
+            "codeFiles": limited(code_files),
+            "ui": {
+                "hasUiCode": has_ui_code,
+                "frameworkHints": sorted(framework_hints),
+                "routeDirs": limited(route_dirs),
+                "componentDirs": limited(component_dirs),
+                "styleFiles": limited(style_files),
+                "designSystemFiles": limited(design_system_files),
+                "representativeFiles": limited(representative_files),
+            },
+            "sfkArtifacts": limited(sfk_artifacts),
+        },
+        "warnings": warnings,
+    }
+
+
+def artifact_summary(artifact: dict[str, Any]) -> dict[str, Any]:
+    files = artifact.get("files") or []
+    health = artifact_files_health(files)
+    return {
+        "status": artifact.get("status", "pending"),
+        "quality": artifact.get("quality"),
+        "currentFile": files[-1] if files else None,
+        "files": health["files"],
+        "missingFiles": health["missing"],
+        "emptyFiles": health["empty"],
+        "hasUsableFile": health["hasUsableFile"],
+    }
+
+
+def downstream_phases(phase: str) -> list[str]:
+    validate_phase(phase)
+    phase_ids = [phase_id for phase_id, _ in PHASES]
+    index = phase_ids.index(phase)
+    if phase == "ui_design":
+        candidates = ["development", "testing"]
+        return [item for item in phase_ids[index + 1:] if item in candidates]
+    return phase_ids[index + 1:]
+
+
+def artifact_impact_report(state: dict[str, Any], phase: str) -> dict[str, Any]:
+    validate_phase(phase)
+    artifacts = state.get("artifacts", {})
+    downstream: list[dict[str, Any]] = []
+    for item in downstream_phases(phase):
+        artifact = artifacts.get(item, {})
+        summary = artifact_summary(artifact)
+        has_state = summary["status"] != "pending" or bool(summary["files"])
+        needs_review = has_state
+        reason = "暂无已生成产出物。"
+        if needs_review:
+            if phase == "requirement":
+                reason = "需求变更可能影响后续阶段的范围、页面、设计、实现、测试或部署。"
+            elif phase == "ui_design":
+                reason = "UI 设计变更可能影响前端实现、测试用例、交互验收和可访问性检查。"
+            else:
+                reason = f"{PHASE_NAMES[phase]} 变更可能影响该阶段产出物。"
+            if summary["missingFiles"]:
+                reason += " 产出物文件缺失，需要先修复引用。"
+            elif summary["emptyFiles"]:
+                reason += " 产出物文件为空，需要复核内容。"
+        downstream.append({
+            "phase": item,
+            "phaseName": PHASE_NAMES[item],
+            **summary,
+            "needsReview": needs_review,
+            "reason": reason,
+        })
+    current = artifact_summary(artifacts.get(phase, {}))
+    return {
+        "phase": phase,
+        "phaseName": PHASE_NAMES[phase],
+        "currentArtifact": current,
+        "downstream": downstream,
+        "shouldWarnBeforeChange": any(item["needsReview"] for item in downstream),
+    }
+
+
 def validate_module_id(module_id: str) -> None:
     if not MODULE_ID_RE.fullmatch(module_id):
         raise SfkError("moduleId 只能包含小写字母、数字、连字符，且不能以连字符开头或结尾。")
@@ -434,7 +787,34 @@ def phase_summary(artifact: dict[str, Any]) -> str:
     files = artifact.get("files") or []
     file_text = files[-1] if files else ""
     quality_text = f" {quality}" if quality else ""
-    return f"{status}{quality_text} {file_text}".rstrip()
+    warning = ""
+    if status == "done" and quality == "confirmed":
+        health = artifact_files_health(files)
+        if not health["hasUsableFile"]:
+            warning = " ⚠️ 产出物文件缺失或为空"
+    return f"{status}{quality_text} {file_text}{warning}".rstrip()
+
+
+def next_step_suggestion(state: dict[str, Any]) -> str:
+    artifacts = state.get("artifacts", {})
+    requirement = artifacts.get("requirement", {})
+    ui_design = artifacts.get("ui_design", {})
+    if not artifact_is_satisfied(requirement):
+        if requirement.get("status") == "in_progress" or requirement.get("quality") == "draft":
+            return "💡 下一步建议：继续使用 /sfk-req 完善并确认需求草稿。"
+        return "💡 下一步建议：/sfk-req <需求描述>"
+    if not artifact_is_satisfied(ui_design):
+        if ui_design.get("status") == "in_progress" or ui_design.get("quality") == "draft":
+            return "💡 下一步建议：继续使用 /sfk-ui 完善并确认 UI 设计草稿。"
+        return "💡 下一步建议：/sfk-ui"
+    return "💡 下一步建议：/sfk-design（后续阶段预留，尚未完整实现）"
+
+
+def print_dependency_warnings(state: dict[str, Any]) -> None:
+    for phase_id, phase_name in PHASES:
+        info = dependency_status(state, phase_id)
+        if info["status"] == "done" and info["quality"] == "confirmed" and not info["satisfied"]:
+            print(f"  ⚠️ {phase_name} 已标记 confirmed，但产出物不可用：{info['reason']}")
 
 
 def module_status(_: argparse.Namespace) -> None:
@@ -446,6 +826,7 @@ def module_status(_: argparse.Namespace) -> None:
     artifacts = state.get("artifacts", {})
     for phase_id, phase_name in PHASES:
         print(f"  - {phase_name}：{phase_summary(artifacts.get(phase_id, {}))}")
+    print_dependency_warnings(state)
 
 
 def render_status(_: argparse.Namespace) -> None:
@@ -478,7 +859,8 @@ def render_status(_: argparse.Namespace) -> None:
     artifacts = state.get("artifacts", {})
     for phase_id, phase_name in PHASES:
         print(f"  - {phase_name}：{phase_summary(artifacts.get(phase_id, {}))}")
-    print("\n💡 下一步建议：/sfk-req <需求描述> 或 /sfk-module status")
+    print_dependency_warnings(state)
+    print(f"\n{next_step_suggestion(state)}")
 
 
 def config_show(_: argparse.Namespace) -> None:
@@ -505,8 +887,7 @@ def config_set(args: argparse.Namespace) -> None:
 def artifact_current(args: argparse.Namespace) -> None:
     _, state, module_id = require_current_state()
     phase = args.phase
-    if phase not in dict(PHASES):
-        raise SfkError(f"未知阶段：{phase}")
+    validate_phase(phase)
     artifact = state.get("artifacts", {}).get(phase, {})
     files = artifact.get("files") or []
     current_file = files[-1] if files else None
@@ -525,8 +906,7 @@ def artifact_current(args: argparse.Namespace) -> None:
 def artifact_update(args: argparse.Namespace, confirmed: bool) -> None:
     index, state, module_id = require_current_state()
     phase = args.phase
-    if phase not in dict(PHASES):
-        raise SfkError(f"未知阶段：{phase}")
+    validate_phase(phase)
     artifact = state.setdefault("artifacts", {}).setdefault(phase, {})
     timestamp = now_iso()
     if confirmed:
@@ -586,6 +966,26 @@ def artifact_update(args: argparse.Namespace, confirmed: bool) -> None:
         print(f"owner：{artifact.get('owner')}")
 
 
+def phase_check(args: argparse.Namespace) -> None:
+    _, state, module_id = require_current_state()
+    phase = args.phase
+    result = check_phase_dependencies(state, phase)
+    result["moduleId"] = module_id
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+def context_discover(args: argparse.Namespace) -> None:
+    result = discover_project_context(args.phase)
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+def artifact_impact(args: argparse.Namespace) -> None:
+    _, state, module_id = require_current_state()
+    result = artifact_impact_report(state, args.phase)
+    result["moduleId"] = module_id
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+
+
 def tui_select(args: argparse.Namespace) -> None:
     import sfk_tui
 
@@ -641,6 +1041,21 @@ def build_parser() -> argparse.ArgumentParser:
     p_confirm = artifact_sub.add_parser("confirm")
     p_confirm.add_argument("phase")
     p_confirm.set_defaults(func=lambda args: artifact_update(args, confirmed=True))
+    p_impact = artifact_sub.add_parser("impact")
+    p_impact.add_argument("phase")
+    p_impact.set_defaults(func=artifact_impact)
+
+    p_context = sub.add_parser("context")
+    context_sub = p_context.add_subparsers(dest="context_command", required=True)
+    p_discover = context_sub.add_parser("discover")
+    p_discover.add_argument("--phase", required=True)
+    p_discover.set_defaults(func=context_discover)
+
+    p_phase = sub.add_parser("phase")
+    phase_sub = p_phase.add_subparsers(dest="phase_command", required=True)
+    p_phase_check = phase_sub.add_parser("check")
+    p_phase_check.add_argument("phase")
+    p_phase_check.set_defaults(func=phase_check)
 
     p_tui = sub.add_parser("tui")
     tui_sub = p_tui.add_subparsers(dest="tui_command", required=True)

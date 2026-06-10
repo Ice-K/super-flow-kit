@@ -18,11 +18,15 @@ v0.1 已实现：
 - `/sfk-module create/list/switch/status` — 管理功能模块；`create` 在 slash command 交互中可智能推荐 `moduleId`，`--id` 可显式覆盖。
 - `/sfk-config` — 查看配置，并支持设置 `pluginName` 和 `userName`。
 - `/sfk-req` — 进入需求分析流程，指导 Claude 单题澄清、展示问题与选择汇总、总结确认、提供方案、生成草稿并等待用户确认。
+- `scripts/sfk.py phase check <phase>` — 只读阶段依赖检查，用于判断后续阶段是否可继续。
 - `scripts/sfk.py tui select` — 通用键盘选择底层能力，支持单选/多选；交互终端中可用上下键、空格和 Enter，非交互环境会安全降级。
 
-v0.1 暂未实现：
+v0.2 窄范围切片已开始实现：
 
-- `/sfk-ui`
+- `/sfk-ui` — 进入 UI 设计阶段，复用通用 artifact draft/confirm 状态机生成或更新 UI 设计文档。
+
+暂未完整实现：
+
 - `/sfk-design`
 - `/sfk-dev`
 - `/sfk-test`
@@ -41,7 +45,7 @@ v0.1 暂未实现：
 需求分析 → UI 设计 → 系统设计 → 软件开发 → 功能测试 → 部署上线
 ```
 
-v0.1 只完整实现 **需求分析** 阶段。后续阶段已在规格和状态模型中预留。
+v0.1 完整实现 **需求分析** 阶段；v0.2 已开始以 `/sfk-ui` 形式实现 **UI 设计** 的窄范围切片。后续阶段已在规格和状态模型中预留。
 
 ## MVP 使用路径
 
@@ -85,7 +89,8 @@ v0.1 只完整实现 **需求分析** 阶段。后续阶段已在规格和状态
     ├── sfk-status.md
     ├── sfk-module.md
     ├── sfk-config.md
-    └── sfk-req.md
+    ├── sfk-req.md
+    └── sfk-ui.md
 
 scripts/
 ├── sfk.py
@@ -99,7 +104,8 @@ tests/
 └── test_sfk_cli.py
 
 templates/
-└── requirement.md
+├── requirement.md
+└── ui-design.md
 
 docs/
 └── MVP-PLAN.md
@@ -121,7 +127,8 @@ CLAUDE.md                  # Claude Code 项目指导
 docs/
 └── super-flow-kit/
     └── {moduleId}/
-        └── yyyyMMddHHmmss-{moduleId}-需求分析.md  # 主需求文档；显式新版本时会新增文件
+        ├── yyyyMMddHHmmss-{moduleId}-需求分析.md
+        └── yyyyMMddHHmmss-{moduleId}-UI设计.md
 ```
 
 这些运行时状态默认被 `.gitignore` 忽略：
@@ -153,7 +160,11 @@ python scripts/sfk.py config show
 python scripts/sfk.py config set pluginName flow
 python scripts/sfk.py config set userName 阿杰
 python scripts/sfk.py artifact current requirement
-python scripts/sfk.py tui select --title "选择方案" --mode single --option mvp="MVP 方案" --option custom="其他"
+python scripts/sfk.py context discover --phase requirement
+python scripts/sfk.py context discover --phase ui_design
+python scripts/sfk.py artifact impact requirement
+python scripts/sfk.py phase check ui_design
+python scripts/sfk.py tui select --title "选择方案" --mode single --option mvp="MVP 方案" --option full="完整方案"
 python scripts/sfk.py status
 ```
 
@@ -179,6 +190,9 @@ rm -rf .sfk docs/super-flow-kit
 - 草稿保存后：`status = in_progress`，`quality = draft`
 - 用户明确确认后：`status = done`，`quality = confirmed`
 - `artifacts.requirement.files[-1]` 是当前主需求文档；重复执行 `/sfk-req` 默认更新该文件并追加变更记录。
+- `scripts/sfk.py phase check <phase>` 提供只读阶段依赖检查；`ui_design` 对 `requirement` 是软依赖，可带假设继续，`system_design` 等后续阶段会按硬依赖阻塞。
+- `scripts/sfk.py context discover --phase <phase>` 提供只读上下文发现，用于区分全新项目、已有业务文档、已有代码和已有 UI 代码。
+- `scripts/sfk.py artifact impact <phase>` 提供只读下游影响分析，用于补充或变更需求/UI 时提示后续产出物复核风险。
 - `/sfk-req` 在写入草稿前会展示所有问题与用户选择，并提供确认、修改、回退、重选和取消分支。
 - `scripts/sfk.py tui select` 是无状态的通用交互选择能力；slash command 仍保留文本/编号选择作为兜底。
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -14,6 +15,7 @@ SFK_SCRIPT = REPO_ROOT / "scripts" / "sfk.py"
 MODULE_ID = "user-management"
 MODULE_NAME = "用户管理"
 REQ_DOC = f"docs/super-flow-kit/{MODULE_ID}/20260610120000-{MODULE_ID}-需求分析.md"
+UI_DOC = f"docs/super-flow-kit/{MODULE_ID}/20260610123000-{MODULE_ID}-UI设计.md"
 
 
 def run_sfk(project_dir: Path, *args: str, check: bool = True, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
@@ -60,6 +62,27 @@ def write_requirement_doc(project_dir: Path, rel_path: str = REQ_DOC) -> Path:
         "| 时间 | 变更 | 负责人 |\n"
         "| --- | --- | --- |\n"
         "| 2026-06-10 | 创建需求草稿 | 待确认 |\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def write_ui_doc(project_dir: Path, rel_path: str = UI_DOC) -> Path:
+    path = project_dir / rel_path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "# 用户管理 UI 设计\n\n"
+        "## 4. 文档信息\n\n"
+        "| 字段 | 值 |\n"
+        "| --- | --- |\n"
+        "| 模块 | 用户管理 |\n"
+        "| 质量状态 | pending |\n\n"
+        "## 8. 页面清单\n\n"
+        "- 登录页\n\n"
+        "## 1. 变更记录\n\n"
+        "| 时间 | 变更 | 负责人 |\n"
+        "| --- | --- | --- |\n"
+        "| 2026-06-10 | 创建 UI 草稿 | 待确认 |\n",
         encoding="utf-8",
     )
     return path
@@ -232,7 +255,7 @@ class SfkCliTests(unittest.TestCase):
                 "--option",
                 "mvp=MVP方案",
                 "--option",
-                "custom=其他",
+                "full=完整方案",
             )
             payload = json.loads(result.stdout)
             self.assertEqual(payload["status"], "non_interactive")
@@ -242,9 +265,234 @@ class SfkCliTests(unittest.TestCase):
                 payload["options"],
                 [
                     {"key": "mvp", "label": "MVP方案"},
-                    {"key": "custom", "label": "其他"},
+                    {"key": "full", "label": "完整方案"},
                 ],
             )
+
+    def test_phase_check_allows_ui_with_soft_missing_requirement(self) -> None:
+        with self.make_project() as tmp:
+            project_dir = Path(tmp)
+            self.init_project(project_dir)
+            self.create_module(project_dir)
+
+            result = run_sfk(project_dir, "phase", "check", "ui_design")
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["moduleId"], MODULE_ID)
+            self.assertEqual(payload["phase"], "ui_design")
+            self.assertFalse(payload["blocked"])
+            self.assertTrue(payload["canContinue"])
+            self.assertEqual(payload["hardMissing"], [])
+            self.assertEqual(payload["softMissing"][0]["phase"], "requirement")
+            self.assertEqual(payload["softMissing"][0]["reason"], "missing")
+
+    def test_phase_check_hard_dependencies_require_confirmed_non_empty_artifacts(self) -> None:
+        git_env = {
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "user.name",
+            "GIT_CONFIG_VALUE_0": "Test Owner",
+        }
+        with self.make_project() as tmp:
+            project_dir = Path(tmp)
+            self.init_project(project_dir)
+            self.create_module(project_dir)
+
+            result = run_sfk(project_dir, "phase", "check", "system_design")
+            payload = json.loads(result.stdout)
+            self.assertTrue(payload["blocked"])
+            self.assertEqual(payload["hardMissing"][0]["phase"], "requirement")
+            self.assertEqual(payload["hardMissing"][0]["reason"], "missing")
+
+            write_requirement_doc(project_dir)
+            run_sfk(project_dir, "artifact", "draft", "requirement", REQ_DOC)
+            result = run_sfk(project_dir, "phase", "check", "system_design")
+            payload = json.loads(result.stdout)
+            self.assertTrue(payload["blocked"])
+            self.assertEqual(payload["hardMissing"][0]["reason"], "draft")
+
+            run_sfk(project_dir, "artifact", "confirm", "requirement", env=git_env)
+            result = run_sfk(project_dir, "phase", "check", "system_design")
+            payload = json.loads(result.stdout)
+            self.assertFalse(payload["blocked"])
+            self.assertEqual(payload["hardMissing"], [])
+
+            (project_dir / REQ_DOC).write_text("", encoding="utf-8")
+            result = run_sfk(project_dir, "phase", "check", "system_design")
+            payload = json.loads(result.stdout)
+            self.assertTrue(payload["blocked"])
+            self.assertEqual(payload["hardMissing"][0]["reason"], "file_empty")
+
+            (project_dir / REQ_DOC).unlink()
+            result = run_sfk(project_dir, "phase", "check", "system_design")
+            payload = json.loads(result.stdout)
+            self.assertTrue(payload["blocked"])
+            self.assertEqual(payload["hardMissing"][0]["reason"], "file_missing")
+
+    def test_ui_design_artifact_reuses_generic_draft_confirm_flow(self) -> None:
+        git_env = {
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "user.name",
+            "GIT_CONFIG_VALUE_0": "Test Owner",
+        }
+        with self.make_project() as tmp:
+            project_dir = Path(tmp)
+            self.init_project(project_dir)
+            self.create_module(project_dir)
+            doc_path = write_ui_doc(project_dir)
+
+            run_sfk(project_dir, "artifact", "draft", "ui_design", UI_DOC)
+            state = self.module_state(project_dir)
+            artifact = state["artifacts"]["ui_design"]
+            self.assertEqual(artifact["status"], "in_progress")
+            self.assertEqual(artifact["quality"], "draft")
+            self.assertEqual(artifact["files"][-1], UI_DOC)
+            self.assertNotIn("\\", artifact["files"][-1])
+            self.assertFalse(Path(artifact["files"][-1]).is_absolute())
+
+            text = doc_path.read_text(encoding="utf-8")
+            self.assertIn("## 1. 文档信息", text)
+            self.assertIn("| 质量状态 | draft |", text)
+
+            run_sfk(project_dir, "artifact", "confirm", "ui_design", env=git_env)
+            state = self.module_state(project_dir)
+            artifact = state["artifacts"]["ui_design"]
+            self.assertEqual(artifact["status"], "done")
+            self.assertEqual(artifact["quality"], "confirmed")
+            self.assertEqual(artifact["owner"], "Test Owner")
+
+            text = doc_path.read_text(encoding="utf-8")
+            self.assertIn("| 质量状态 | confirmed |", text)
+            self.assertIn("| 2026-06-10 | 创建 UI 草稿 | Test Owner |", text)
+
+    def test_context_discover_identifies_new_project(self) -> None:
+        with self.make_project() as tmp:
+            project_dir = Path(tmp)
+            self.init_project(project_dir)
+            self.create_module(project_dir)
+
+            result = run_sfk(project_dir, "context", "discover", "--phase", "requirement")
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["projectKind"], "new_project")
+            self.assertEqual(payload["phase"], "requirement")
+            self.assertEqual(payload["moduleId"], MODULE_ID)
+            for group in ("manifests", "businessDocs", "sourceDirs", "codeFiles", "sfkArtifacts"):
+                for item in payload["evidence"][group]:
+                    self.assertNotIn("\\", item)
+                    self.assertFalse(Path(item).is_absolute())
+
+    def test_context_discover_identifies_business_docs_without_sfk_artifacts(self) -> None:
+        with self.make_project() as tmp:
+            project_dir = Path(tmp)
+            self.init_project(project_dir)
+            self.create_module(project_dir)
+            (project_dir / "README.md").write_text("# Existing product\n", encoding="utf-8")
+            (project_dir / "docs").mkdir(exist_ok=True)
+            (project_dir / "docs" / "product.md").write_text("# Product doc\n", encoding="utf-8")
+            write_requirement_doc(project_dir)
+
+            result = run_sfk(project_dir, "context", "discover", "--phase", "requirement")
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["projectKind"], "existing_business_docs")
+            self.assertIn("README.md", payload["evidence"]["businessDocs"])
+            self.assertIn("docs/product.md", payload["evidence"]["businessDocs"])
+            self.assertNotIn(REQ_DOC, payload["evidence"]["businessDocs"])
+            self.assertIn(REQ_DOC, payload["evidence"]["sfkArtifacts"])
+
+    def test_context_discover_identifies_existing_ui_code_and_ignores_skipped_dirs(self) -> None:
+        with self.make_project() as tmp:
+            project_dir = Path(tmp)
+            self.init_project(project_dir)
+            self.create_module(project_dir)
+            (project_dir / "package.json").write_text('{"dependencies":{"react":"latest"}}\n', encoding="utf-8")
+            (project_dir / "src" / "components").mkdir(parents=True)
+            (project_dir / "src" / "components" / "Button.tsx").write_text("export function Button() { return <button /> }\n", encoding="utf-8")
+            (project_dir / "src" / "pages").mkdir(parents=True)
+            (project_dir / "src" / "pages" / "Login.tsx").write_text("export default function Login() { return null }\n", encoding="utf-8")
+            (project_dir / "src" / "styles").mkdir(parents=True)
+            (project_dir / "src" / "styles" / "globals.css").write_text("@tailwind base;\n", encoding="utf-8")
+            (project_dir / "tailwind.config.js").write_text("module.exports = {}\n", encoding="utf-8")
+            (project_dir / "node_modules" / "fake").mkdir(parents=True)
+            (project_dir / "node_modules" / "fake" / "Ignored.tsx").write_text("export const Ignored = 1\n", encoding="utf-8")
+            (project_dir / ".sfk" / "fake").mkdir(parents=True, exist_ok=True)
+            (project_dir / ".sfk" / "fake" / "Ignored.tsx").write_text("export const Ignored = 1\n", encoding="utf-8")
+
+            result = run_sfk(project_dir, "context", "discover", "--phase", "ui_design")
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["projectKind"], "existing_ui_code")
+            self.assertTrue(payload["evidence"]["ui"]["hasUiCode"])
+            self.assertIn("package.json", payload["evidence"]["manifests"])
+            self.assertIn("src/components/Button.tsx", payload["evidence"]["ui"]["representativeFiles"])
+            self.assertIn("src/styles/globals.css", payload["evidence"]["ui"]["styleFiles"])
+            self.assertIn("tailwind.config.js", payload["evidence"]["ui"]["designSystemFiles"])
+            flattened = json.dumps(payload, ensure_ascii=False)
+            self.assertNotIn("node_modules/fake/Ignored.tsx", flattened)
+            self.assertNotIn(".sfk/fake/Ignored.tsx", flattened)
+
+    def test_artifact_impact_reports_downstream_ui_review(self) -> None:
+        with self.make_project() as tmp:
+            project_dir = Path(tmp)
+            self.init_project(project_dir)
+            self.create_module(project_dir)
+            write_requirement_doc(project_dir)
+            run_sfk(project_dir, "artifact", "draft", "requirement", REQ_DOC)
+            write_ui_doc(project_dir)
+            run_sfk(project_dir, "artifact", "draft", "ui_design", UI_DOC)
+
+            result = run_sfk(project_dir, "artifact", "impact", "requirement")
+            payload = json.loads(result.stdout)
+            ui_impact = next(item for item in payload["downstream"] if item["phase"] == "ui_design")
+            self.assertTrue(payload["shouldWarnBeforeChange"])
+            self.assertTrue(ui_impact["needsReview"])
+            self.assertEqual(ui_impact["currentFile"], UI_DOC)
+            self.assertNotIn("\\", ui_impact["currentFile"])
+
+    def test_artifact_impact_without_downstream_outputs_no_warning(self) -> None:
+        with self.make_project() as tmp:
+            project_dir = Path(tmp)
+            self.init_project(project_dir)
+            self.create_module(project_dir)
+            write_requirement_doc(project_dir)
+            run_sfk(project_dir, "artifact", "draft", "requirement", REQ_DOC)
+
+            result = run_sfk(project_dir, "artifact", "impact", "requirement")
+            payload = json.loads(result.stdout)
+            self.assertFalse(payload["shouldWarnBeforeChange"])
+            self.assertTrue(all(not item["needsReview"] for item in payload["downstream"]))
+
+    def test_artifact_impact_reports_ui_downstream_review_and_rejects_unknown_phase(self) -> None:
+        with self.make_project() as tmp:
+            project_dir = Path(tmp)
+            self.init_project(project_dir)
+            self.create_module(project_dir)
+            write_ui_doc(project_dir)
+            run_sfk(project_dir, "artifact", "draft", "ui_design", UI_DOC)
+            dev_doc = f"docs/super-flow-kit/{MODULE_ID}/dev.md"
+            (project_dir / dev_doc).write_text("# Dev doc\n", encoding="utf-8")
+            run_sfk(project_dir, "artifact", "draft", "development", dev_doc)
+
+            result = run_sfk(project_dir, "artifact", "impact", "ui_design")
+            payload = json.loads(result.stdout)
+            development = next(item for item in payload["downstream"] if item["phase"] == "development")
+            self.assertTrue(payload["shouldWarnBeforeChange"])
+            self.assertTrue(development["needsReview"])
+
+            unknown = run_sfk(project_dir, "artifact", "impact", "unknown", check=False)
+            self.assertNotEqual(unknown.returncode, 0)
+            self.assertIn("未知阶段", unknown.stderr)
+
+    def test_command_docs_do_not_use_fixed_custom_options(self) -> None:
+        command_paths = [
+            REPO_ROOT / ".claude" / "commands" / "sfk-req.md",
+            REPO_ROOT / ".claude" / "commands" / "sfk-ui.md",
+        ]
+        forbidden_line_patterns = [
+            re.compile(r"^\s*-\s*(自定义|其他)(\s|$)"),
+            re.compile(r"--option\s+custom"),
+            re.compile(r"custom=其他"),
+        ]
+        for path in command_paths:
+            for line in path.read_text(encoding="utf-8").splitlines():
+                for pattern in forbidden_line_patterns:
+                    self.assertIsNone(pattern.search(line), f"{path}: {line}")
 
 
 if __name__ == "__main__":

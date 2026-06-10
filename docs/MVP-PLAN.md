@@ -103,14 +103,24 @@ python scripts/sfk.py config show
 python scripts/sfk.py config set pluginName flow
 python scripts/sfk.py config set userName 阿杰
 python scripts/sfk.py artifact current requirement
+python scripts/sfk.py context discover --phase requirement
+python scripts/sfk.py context discover --phase ui_design
+python scripts/sfk.py artifact impact requirement
+python scripts/sfk.py phase check ui_design
 python scripts/sfk.py artifact draft requirement docs/super-flow-kit/user-management/<需求文档>.md
 python scripts/sfk.py artifact confirm requirement
 python scripts/sfk.py status
 ```
 
+## 后续开发记录
+
+- v0.1 MVP 后新增 Python 标准库回归测试，覆盖 MVP 状态机、artifact 流转、安全边界和 TUI 非交互降级。
+- v0.2 窄范围切片开始实现 `/sfk-ui`：复用通用 `artifact draft/confirm/current` 状态机进入 UI 设计阶段，并新增只读 `python scripts/sfk.py phase check <phase>` 阶段依赖检查。
+- REQ/UI 阶段增强上下文发现和影响分析：新增只读 `python scripts/sfk.py context discover --phase <phase>` 和 `python scripts/sfk.py artifact impact <phase>`，用于先识别全新/已有项目，再提示下游产出物复核风险。
+
 ## 不在本轮实现
 
-- 完整 `/sfk-ui`、`/sfk-design`、`/sfk-dev`、`/sfk-test`、`/sfk-deploy` 流程。
+- 完整 `/sfk-design`、`/sfk-dev`、`/sfk-test`、`/sfk-deploy` 流程。
 - `/sfk-export`。
 - `/sfk-reset`。
 - `/sfk-code-review`。
