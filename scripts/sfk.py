@@ -89,6 +89,41 @@ MANIFEST_NAMES = {
 UI_EXTENSIONS = {".tsx", ".jsx", ".vue", ".svelte", ".html", ".css", ".scss", ".less"}
 CODE_EXTENSIONS = {".py", ".js", ".ts", ".tsx", ".jsx", ".vue", ".svelte", ".go", ".rs", ".java", ".kt", ".cs", ".php", ".rb"}
 UI_DIR_PARTS = {"app", "pages", "components", "layouts", "views", "routes", "styles", "assets", "public", "ui", "design"}
+SYSTEM_DESIGN_REQUIRED_SECTIONS = [
+    "文档信息",
+    "设计目标与范围",
+    "需求依据",
+    "UI / 交互依据",
+    "项目技术现状与约束",
+    "技术选型",
+    "系统架构",
+    "模块划分",
+    "数据模型",
+    "API / 接口设计",
+    "权限与安全",
+    "错误处理与可观测性",
+    "性能与扩展性",
+    "部署与运行约束",
+    "风险与备选方案",
+    "假设与待确认问题",
+    "下游影响分析",
+    "变更记录",
+]
+SYSTEM_DESIGN_TEMPLATE_FIELDS = {
+    "displayName",
+    "moduleId",
+    "version",
+    "quality",
+    "createdAt",
+    "updatedAt",
+    "owner",
+}
+SYSTEM_DESIGN_BRACKET_PLACEHOLDER_RE = re.compile(
+    r"\[(?:说明|引用|列出|全新项目|已有业务文档|已有代码|已有 UI 代码|"
+    r"语言/框架/存储/队列/缓存/测试/部署|选型|理由|备选|待确认|"
+    r"模块名称|职责|输入|输出|依赖|备注|实体名称|字段|创建/更新/删除/归档|存储或来源|约束|"
+    r"接口名称|调用方|提供方|入参|出参|错误|权限|风险|影响|条件|缓解|问题|建议|是/否|动作)[^\]]*\]"
+)
 
 
 class SfkError(Exception):
@@ -259,6 +294,78 @@ def check_artifact_document(file_path: str, phase: str, artifact: dict[str, Any]
         trailing_newline = "\n" if text.endswith("\n") else ""
         path.write_text("\n".join(lines) + trailing_newline, encoding="utf-8")
     return fixes
+
+
+def normalize_heading_title(title: str) -> str:
+    return re.sub(r"^\d+(?:\.\d+)*(?:[.、])?\s*", "", title.strip())
+
+
+def markdown_h2_titles(text: str) -> list[str]:
+    titles: list[str] = []
+    for line in text.splitlines():
+        match = re.match(r"^##\s+(.+?)\s*$", line)
+        if match:
+            titles.append(normalize_heading_title(match.group(1)))
+    return titles
+
+
+def detect_system_design_placeholders(text: str) -> list[str]:
+    placeholders: list[str] = []
+    seen: set[str] = set()
+    for line_number, line in enumerate(text.splitlines(), start=1):
+        for match in re.finditer(r"\{([A-Za-z][A-Za-z0-9_]*)\}", line):
+            if match.group(1) not in SYSTEM_DESIGN_TEMPLATE_FIELDS:
+                continue
+            item = f"第 {line_number} 行：{match.group(0)}"
+            if item not in seen:
+                placeholders.append(item)
+                seen.add(item)
+        for match in SYSTEM_DESIGN_BRACKET_PLACEHOLDER_RE.finditer(line):
+            item = f"第 {line_number} 行：{match.group(0)}"
+            if item not in seen:
+                placeholders.append(item)
+                seen.add(item)
+    return placeholders
+
+
+def validate_system_design_document(file_path: str, confirmed: bool) -> dict[str, list[str]]:
+    path = root() / file_path
+    errors: list[str] = []
+    warnings: list[str] = []
+    if not path.exists() or not path.is_file():
+        errors.append(f"系统设计文档不存在：{file_path}")
+        return {"errors": errors, "warnings": warnings}
+    if path.stat().st_size <= 0:
+        errors.append(f"系统设计文档为空：{file_path}")
+        return {"errors": errors, "warnings": warnings}
+    if path.suffix.lower() != ".md":
+        errors.append(f"系统设计文档必须是 Markdown 文件：{file_path}")
+        return {"errors": errors, "warnings": warnings}
+
+    text = path.read_text(encoding="utf-8")
+    titles = set(markdown_h2_titles(text))
+    missing_sections = [section for section in SYSTEM_DESIGN_REQUIRED_SECTIONS if section not in titles]
+    if missing_sections:
+        errors.append("系统设计文档缺少必备章节：" + "、".join(missing_sections))
+
+    placeholders = detect_system_design_placeholders(text)
+    if placeholders:
+        message = "系统设计文档仍包含模板占位符：" + "；".join(placeholders[:10])
+        if len(placeholders) > 10:
+            message += f"；另有 {len(placeholders) - 10} 处"
+        if confirmed:
+            errors.append(message)
+        else:
+            warnings.append(message)
+    return {"errors": errors, "warnings": warnings}
+
+
+def enforce_hard_dependencies(state: dict[str, Any], phase: str) -> None:
+    result = check_phase_dependencies(state, phase)
+    if not result["hardMissing"]:
+        return
+    details = "；".join(f"{item['phaseName']}({item['phase']}): {item['reason']}" for item in result["hardMissing"])
+    raise SfkError(f"{PHASE_NAMES[phase]} 硬依赖未满足，不能更新阶段产出物：{details}")
 
 
 def read_json(path: Path) -> dict[str, Any]:
@@ -473,13 +580,23 @@ def discover_project_context(phase: str) -> dict[str, Any]:
     design_system_files: list[str] = []
     representative_files: list[str] = []
     framework_hints: set[str] = set()
+    entrypoint_files: list[str] = []
+    config_files: list[str] = []
+    api_files: list[str] = []
+    service_files: list[str] = []
+    data_files: list[str] = []
+    test_files: list[str] = []
+    deploy_files: list[str] = []
 
     for path in files:
         file_path = rel(path)
         lower = file_path.lower()
         parts = file_path.split("/")
+        lower_parts = [part.lower() for part in parts]
         name = path.name
+        lower_name = name.lower()
         suffix = path.suffix.lower()
+        stem = path.stem.lower()
 
         if lower.startswith("docs/super-flow-kit/"):
             sfk_artifacts.append(file_path)
@@ -504,6 +621,26 @@ def discover_project_context(phase: str) -> dict[str, Any]:
             representative_files.append(file_path)
         for hint in ui_framework_hints(file_path):
             framework_hints.add(hint)
+
+        if stem in {"main", "app", "server", "index"} and suffix in CODE_EXTENSIONS:
+            entrypoint_files.append(file_path)
+        if is_manifest(file_path) or ".config." in lower_name or lower_name.endswith("config.js") or lower_name.endswith("config.ts"):
+            config_files.append(file_path)
+        if any(part in {"api", "route", "routes", "router", "controller", "controllers", "endpoint", "endpoints"} for part in lower_parts):
+            api_files.append(file_path)
+        if any(part in {"service", "services", "domain", "usecase", "usecases", "application"} for part in lower_parts):
+            service_files.append(file_path)
+        if any(part in {"model", "models", "entity", "entities", "repository", "repositories", "schema", "schemas", "migration", "migrations", "prisma", "db", "database"} for part in lower_parts):
+            data_files.append(file_path)
+        if any(part in {"tests", "test"} for part in lower_parts) or ".test." in lower_name or ".spec." in lower_name:
+            test_files.append(file_path)
+        if (
+            lower_name == "dockerfile"
+            or lower_name.startswith("docker-compose")
+            or lower.startswith(".github/workflows/")
+            or any(part in {"k8s", "helm", "vercel", "netlify"} for part in lower_parts)
+        ):
+            deploy_files.append(file_path)
 
     has_ui_code = bool(route_dirs or component_dirs or style_files or design_system_files or representative_files)
     if has_ui_code:
@@ -540,6 +677,15 @@ def discover_project_context(phase: str) -> dict[str, Any]:
                 "styleFiles": limited(style_files),
                 "designSystemFiles": limited(design_system_files),
                 "representativeFiles": limited(representative_files),
+            },
+            "architecture": {
+                "entrypointFiles": limited(entrypoint_files),
+                "configFiles": limited(config_files),
+                "apiFiles": limited(api_files),
+                "serviceFiles": limited(service_files),
+                "dataFiles": limited(data_files),
+                "testFiles": limited(test_files),
+                "deployFiles": limited(deploy_files),
             },
             "sfkArtifacts": limited(sfk_artifacts),
         },
@@ -586,6 +732,8 @@ def artifact_impact_report(state: dict[str, Any], phase: str) -> dict[str, Any]:
                 reason = "需求变更可能影响后续阶段的范围、页面、设计、实现、测试或部署。"
             elif phase == "ui_design":
                 reason = "UI 设计变更可能影响前端实现、测试用例、交互验收和可访问性检查。"
+            elif phase == "system_design":
+                reason = "系统设计变更可能影响开发实现、接口/数据模型、测试覆盖、部署配置、监控和回滚策略。"
             else:
                 reason = f"{PHASE_NAMES[phase]} 变更可能影响该阶段产出物。"
             if summary["missingFiles"]:
@@ -799,15 +947,20 @@ def next_step_suggestion(state: dict[str, Any]) -> str:
     artifacts = state.get("artifacts", {})
     requirement = artifacts.get("requirement", {})
     ui_design = artifacts.get("ui_design", {})
+    system_design = artifacts.get("system_design", {})
     if not artifact_is_satisfied(requirement):
         if requirement.get("status") == "in_progress" or requirement.get("quality") == "draft":
             return "💡 下一步建议：继续使用 /sfk-req 完善并确认需求草稿。"
         return "💡 下一步建议：/sfk-req <需求描述>"
+    if artifact_is_satisfied(system_design):
+        return "💡 下一步建议：/sfk-dev（后续阶段预留，尚未完整实现）"
+    if system_design.get("status") == "in_progress" or system_design.get("quality") == "draft":
+        return "💡 下一步建议：继续使用 /sfk-design 完善并确认系统设计草稿。"
     if not artifact_is_satisfied(ui_design):
         if ui_design.get("status") == "in_progress" or ui_design.get("quality") == "draft":
-            return "💡 下一步建议：继续使用 /sfk-ui 完善并确认 UI 设计草稿。"
-        return "💡 下一步建议：/sfk-ui"
-    return "💡 下一步建议：/sfk-design（后续阶段预留，尚未完整实现）"
+            return "💡 下一步建议：继续使用 /sfk-ui 完善并确认 UI 设计草稿；也可带假设进入 /sfk-design。"
+        return "💡 下一步建议：/sfk-ui；如需先做技术架构，也可进入 /sfk-design。"
+    return "💡 下一步建议：/sfk-design"
 
 
 def print_dependency_warnings(state: dict[str, Any]) -> None:
@@ -907,12 +1060,19 @@ def artifact_update(args: argparse.Namespace, confirmed: bool) -> None:
     index, state, module_id = require_current_state()
     phase = args.phase
     validate_phase(phase)
+    enforce_hard_dependencies(state, phase)
     artifact = state.setdefault("artifacts", {}).setdefault(phase, {})
     timestamp = now_iso()
+    quality_warnings: list[str] = []
     if confirmed:
         files = artifact.get("files") or []
         if not files:
             raise SfkError("没有可确认的阶段产出物。请先保存草稿后再确认。")
+        if phase == "system_design":
+            quality_result = validate_system_design_document(files[-1], confirmed=True)
+            if quality_result["errors"]:
+                raise SfkError("系统设计文档质量检查未通过：" + "；".join(quality_result["errors"]))
+            quality_warnings = quality_result["warnings"]
         owner = current_owner(index)
         artifact["status"] = "done"
         artifact["quality"] = "confirmed"
@@ -924,6 +1084,11 @@ def artifact_update(args: argparse.Namespace, confirmed: bool) -> None:
     else:
         owner = None
         file_path = normalize_artifact_file(args.file)
+        if phase == "system_design":
+            quality_result = validate_system_design_document(file_path, confirmed=False)
+            if quality_result["errors"]:
+                raise SfkError("系统设计文档质量检查未通过：" + "；".join(quality_result["errors"]))
+            quality_warnings = quality_result["warnings"]
         artifact["status"] = "in_progress"
         artifact["quality"] = "draft"
         files = artifact.setdefault("files", [])
@@ -962,6 +1127,13 @@ def artifact_update(args: argparse.Namespace, confirmed: bool) -> None:
             print(f"  - {fix}")
     else:
         print("documentCheck：passed")
+    if phase == "system_design":
+        if quality_warnings:
+            print("qualityCheck：warnings")
+            for warning in quality_warnings:
+                print(f"  - {warning}")
+        else:
+            print("qualityCheck：passed")
     if confirmed:
         print(f"owner：{artifact.get('owner')}")
 

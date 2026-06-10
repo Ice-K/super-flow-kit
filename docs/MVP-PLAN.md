@@ -105,8 +105,12 @@ python scripts/sfk.py config set userName 阿杰
 python scripts/sfk.py artifact current requirement
 python scripts/sfk.py context discover --phase requirement
 python scripts/sfk.py context discover --phase ui_design
+python scripts/sfk.py context discover --phase system_design
 python scripts/sfk.py artifact impact requirement
+python scripts/sfk.py artifact impact system_design
 python scripts/sfk.py phase check ui_design
+python scripts/sfk.py phase check system_design
+python scripts/sfk.py artifact current system_design
 python scripts/sfk.py artifact draft requirement docs/super-flow-kit/user-management/<需求文档>.md
 python scripts/sfk.py artifact confirm requirement
 python scripts/sfk.py status
@@ -118,9 +122,11 @@ python scripts/sfk.py status
 - v0.2 窄范围切片开始实现 `/sfk-ui`：复用通用 `artifact draft/confirm/current` 状态机进入 UI 设计阶段，并新增只读 `python scripts/sfk.py phase check <phase>` 阶段依赖检查。
 - REQ/UI 阶段增强上下文发现和影响分析：新增只读 `python scripts/sfk.py context discover --phase <phase>` 和 `python scripts/sfk.py artifact impact <phase>`，用于先识别全新/已有项目，再提示下游产出物复核风险。
 
+- v0.3 系统设计闭环实现 `/sfk-design`：基于已确认需求产出物进入系统设计阶段，可选结合 UI 设计和现有代码上下文，并复用通用 `artifact draft/confirm/current` 状态机；脚本层强制需求硬依赖、系统设计必备章节和确认前模板占位符清理。
+
 ## 不在本轮实现
 
-- 完整 `/sfk-design`、`/sfk-dev`、`/sfk-test`、`/sfk-deploy` 流程。
+- 完整 `/sfk-dev`、`/sfk-test`、`/sfk-deploy` 流程。
 - `/sfk-export`。
 - `/sfk-reset`。
 - `/sfk-code-review`。
