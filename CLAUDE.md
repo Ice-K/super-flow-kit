@@ -28,6 +28,9 @@ scripts/
 ├── sfk-module.sh       # 模块管理包装脚本
 └── sfk-config.sh       # 配置管理包装脚本
 
+tests/
+└── test_sfk_cli.py     # Python 标准库回归测试
+
 templates/
 └── requirement.md      # 需求分析文档模板
 
@@ -51,9 +54,15 @@ docs/
 
 ## 常用验证命令
 
-当前没有 package manifest、build、lint 或测试套件。v0.1 使用 Bash 命令入口 + Python 标准库脚本。语义化 `moduleId` 推荐发生在 Claude slash command 交互层，Python 脚本只做确定性的状态管理、校验和兜底。
+当前没有 package manifest、build 或 lint 脚本。v0.1 使用 Bash 命令入口 + Python 标准库脚本，并提供 Python 标准库回归测试。语义化 `moduleId` 推荐发生在 Claude slash command 交互层，Python 脚本只做确定性的状态管理、校验和兜底。
 
-脚本级验证命令：
+首选自动回归测试命令（使用临时目录，不污染当前仓库）：
+
+```bash
+python -m unittest discover -s tests -p "test_*.py"
+```
+
+手动 smoke 验证命令（会在当前目录生成 `.sfk/` 和 `docs/super-flow-kit/`）：
 
 ```bash
 python scripts/sfk.py init

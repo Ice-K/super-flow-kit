@@ -51,6 +51,13 @@ scripts/sfk-config.sh
 templates/requirement.md
 ```
 
+### 测试
+
+```text
+tests/
+└── test_sfk_cli.py      # Python 标准库回归测试
+```
+
 ## 实现步骤
 
 1. 初始化本地 git 仓库并关联远程 origin。
@@ -59,7 +66,8 @@ templates/requirement.md
 4. 实现 shell wrapper。
 5. 实现 slash command 文件。
 6. 更新 `CLAUDE.md`。
-7. 运行脚本级验证。
+7. 新增 Python 标准库回归测试，覆盖 MVP 状态机、artifact 流转、安全边界和 TUI 非交互降级。
+8. 运行脚本级验证。
 
 ## `/sfk-req` 交互要求
 
@@ -76,6 +84,14 @@ templates/requirement.md
 11. 每次新增、编辑或合并产出物文档后，必须触发通用文档检查；检查器应自行修复标题编号、文档信息质量状态、确认后的变更记录负责人等可确定问题，并输出检查结果。
 
 ## 脚本级验证命令
+
+首选运行自动回归测试；测试使用临时项目目录，不会污染当前仓库工作区：
+
+```bash
+python -m unittest discover -s tests -p "test_*.py"
+```
+
+也可以运行以下手动 smoke 命令。注意：这些命令会在当前目录生成 `.sfk/` 和 `docs/super-flow-kit/` 运行时状态。
 
 ```bash
 python scripts/sfk.py init

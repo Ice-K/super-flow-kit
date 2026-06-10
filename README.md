@@ -95,6 +95,9 @@ scripts/
 ├── sfk-module.sh
 └── sfk-config.sh
 
+tests/
+└── test_sfk_cli.py
+
 templates/
 └── requirement.md
 
@@ -130,9 +133,15 @@ docs/
 
 ## 脚本级验证
 
-本项目当前不需要安装 npm 依赖，也没有 build/lint/test 脚本。核心状态工具使用 Python 标准库实现。
+本项目当前不需要安装 npm 依赖，也没有 build/lint 脚本。核心状态工具使用 Python 标准库实现，回归测试同样只依赖 Python 标准库。
 
-可以运行以下命令进行脚本级验证。注意：直接运行 `python scripts/sfk.py module create ...` 时没有 Claude 语义推荐能力，中文名称建议显式提供 `--id`。
+首选运行自动回归测试；测试会在临时目录中创建 `.sfk/` 和 `docs/super-flow-kit/`，不会污染当前仓库工作区：
+
+```bash
+python -m unittest discover -s tests -p "test_*.py"
+```
+
+也可以运行以下命令进行手动脚本级验证。注意：直接运行 `python scripts/sfk.py module create ...` 时没有 Claude 语义推荐能力，中文名称建议显式提供 `--id`；这些手动命令会在当前目录生成运行时状态。
 
 ```bash
 python scripts/sfk.py init
