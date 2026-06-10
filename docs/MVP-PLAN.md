@@ -123,6 +123,7 @@ python scripts/sfk.py status
 - REQ/UI 阶段增强上下文发现和影响分析：新增只读 `python scripts/sfk.py context discover --phase <phase>` 和 `python scripts/sfk.py artifact impact <phase>`，用于先识别全新/已有项目，再提示下游产出物复核风险。
 
 - v0.3 系统设计闭环实现 `/sfk-design`：基于已确认需求产出物进入系统设计阶段，可选结合 UI 设计和现有代码上下文，并复用通用 `artifact draft/confirm/current` 状态机；脚本层强制需求硬依赖、系统设计必备章节和确认前模板占位符清理。
+- REQ 阶段补齐脚本层质量门禁：`artifact draft/confirm requirement` 会检查必备章节和模板占位符，输出 `qualityCheck`，确认前不得残留模板占位符。
 
 ## 不在本轮实现
 

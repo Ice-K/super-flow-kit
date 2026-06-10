@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 此仓库正在实现 `super-flow-kit` Claude Code 工作流插件。当前权威规格文档是 `super-flow-kit.md`，`super-flow-kit-v3.1.md` 是 v3.1 草稿副本。
 
-v0.1 MVP 目标是实现最小闭环：初始化项目状态、创建/切换模块、查看看板、配置插件昵称和用户称呼，并通过 `/sfk-req` 引导生成需求分析文档。当前已完成 v0.2 UI 设计窄范围切片，并完成 v0.3 系统设计闭环：通过 `/sfk-design` 进入系统设计阶段，脚本层会强制需求硬依赖、必备章节和确认前占位符清理。
+v0.1 MVP 目标是实现最小闭环：初始化项目状态、创建/切换模块、查看看板、配置插件昵称和用户称呼，并通过 `/sfk-req` 引导生成需求分析文档。当前需求分析已具备脚本层质量门禁；v0.2 UI 设计窄范围切片已完成；v0.3 系统设计闭环已完成，脚本层会强制需求硬依赖、必备章节和确认前占位符清理。
 
 ## 当前实现结构
 
@@ -111,7 +111,7 @@ Slash command 手动验证路径：
 - `/sfk-status` — 查看项目和当前模块看板。
 - `/sfk-module create/list/switch/status` — 管理模块，`create` 在 slash command 交互中可智能推荐 `moduleId`，`--id` 可用于显式指定。
 - `/sfk-config` — 查看配置，支持设置 `pluginName` 和 `userName`。
-- `/sfk-req` — 通过命令文档约束 Claude 执行需求分析流程：单题澄清 → 问题与选择汇总 → 总结确认（可修改/回退/重选/取消）→ 3–5 个方案 → 草稿 → 草稿确认（可继续修改/暂存/取消）→ 用户确认；已有主需求文档时默认合并更新并追加变更记录。
+- `/sfk-req` — 通过命令文档约束 Claude 执行需求分析流程：单题澄清 → 问题与选择汇总 → 总结确认（可修改/回退/重选/取消）→ 3–5 个方案 → 草稿 → 草稿确认（可继续修改/暂存/取消）→ 用户确认；已有主需求文档时默认合并更新并追加变更记录；脚本层会校验需求必备章节并在确认前阻塞模板占位符。
 - `/sfk-ui` — v0.2 窄范围 UI 设计切片：基于需求产出物进入 UI 设计阶段，生成或更新 UI 设计草稿，并复用通用 artifact draft/confirm 状态机。
 - `/sfk-design` — v0.3 系统设计闭环：基于已确认需求产出物进入系统设计阶段，可选结合 UI 设计和已有代码上下文，生成或更新系统设计草稿；脚本层强制需求硬依赖、系统设计必备章节和确认前模板占位符清理。
 - `scripts/sfk.py artifact draft/confirm/current` — 为阶段命令提供草稿、确认和当前产出物读取能力；`draft/confirm` 会触发通用产出物文档检查。
@@ -148,6 +148,7 @@ Slash command 手动验证路径：
 - 阶段状态流转为 `pending → in_progress → done`；依赖缺失时可进入 `blocked`。
 - 产出物质量使用 `draft` / `confirmed`。
 - `artifacts.requirement.files[-1]` 是当前主需求文档；重复执行 `/sfk-req` 默认更新该文件并追加变更记录，只有用户明确要求新版本时才新增需求文档。
+- `/sfk-req` 草稿必须包含需求分析必备章节；确认前不得残留模板占位符，否则脚本拒绝写入 `done/confirmed`。
 - `scripts/sfk.py phase check <phase>` 提供只读阶段依赖检查；`ui_design` 对 `requirement` 是软依赖，可带假设继续，`system_design` 等后续阶段会按硬依赖阻塞；`artifact draft/confirm` 写入层也会强制硬依赖。
 - `scripts/sfk.py context discover --phase <phase>` 提供只读项目上下文发现；REQ/UI/系统设计阶段应先识别全新项目、已有业务文档、已有代码或已有 UI 代码，再开始澄清；系统设计阶段还应读取 `evidence.architecture` 中的入口、配置、API、服务、数据、测试和部署线索。
 - `scripts/sfk.py artifact impact <phase>` 提供只读下游影响分析；补充或变更需求/UI/系统设计时应先提示后续产出物复核风险，不自动降级下游状态。

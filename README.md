@@ -17,7 +17,7 @@ v0.1 已实现：
 - `/sfk-status` — 查看项目和当前模块工作流看板。
 - `/sfk-module create/list/switch/status` — 管理功能模块；`create` 在 slash command 交互中可智能推荐 `moduleId`，`--id` 可显式覆盖。
 - `/sfk-config` — 查看配置，并支持设置 `pluginName` 和 `userName`。
-- `/sfk-req` — 进入需求分析流程，指导 Claude 单题澄清、展示问题与选择汇总、总结确认、提供方案、生成草稿并等待用户确认。
+- `/sfk-req` — 进入需求分析流程，指导 Claude 单题澄清、展示问题与选择汇总、总结确认、提供方案、生成草稿并等待用户确认；脚本层会校验必备章节并在确认前阻塞模板占位符。
 - `scripts/sfk.py phase check <phase>` — 只读阶段依赖检查，用于判断后续阶段是否可继续。
 - `scripts/sfk.py tui select` — 通用键盘选择底层能力，支持单选/多选；交互终端中可用上下键、空格和 Enter，非交互环境会安全降级。
 
@@ -81,7 +81,7 @@ v0.1 完整实现 **需求分析** 阶段；v0.2 以 `/sfk-ui` 形式实现 **UI
 → 标记 done / confirmed
 ```
 
-第一次执行 `/sfk-req` 会创建当前模块的主需求分析文档。后续再次执行 `/sfk-req` 时，默认会把补充内容合并到这份主文档，并在“变更记录”中追加记录；只有用户明确要求新建版本或另存新文档时，才会创建新的时间戳文件。
+第一次执行 `/sfk-req` 会创建当前模块的主需求分析文档。后续再次执行 `/sfk-req` 时，默认会把补充内容合并到这份主文档，并在“变更记录”中追加记录；只有用户明确要求新建版本或另存新文档时，才会创建新的时间戳文件。需求草稿必须包含必备章节；确认前不得残留模板占位符，`artifact draft/confirm requirement` 会输出 `qualityCheck`。
 
 ## 项目结构
 
@@ -201,6 +201,7 @@ rm -rf .sfk docs/super-flow-kit
 - 草稿保存后：`status = in_progress`，`quality = draft`
 - 用户明确确认后：`status = done`，`quality = confirmed`
 - `artifacts.requirement.files[-1]` 是当前主需求文档；重复执行 `/sfk-req` 默认更新该文件并追加变更记录。
+- `/sfk-req` 草稿必须包含需求分析必备章节；确认时不得残留模板占位符，否则脚本会拒绝更新为 `done/confirmed`。
 - `scripts/sfk.py phase check <phase>` 提供只读阶段依赖检查；`ui_design` 对 `requirement` 是软依赖，可带假设继续，`system_design` 等后续阶段会按硬依赖阻塞；`artifact draft/confirm` 写入层也会强制硬依赖。
 - `scripts/sfk.py context discover --phase <phase>` 提供只读上下文发现，用于区分全新项目、已有业务文档、已有代码和已有 UI 代码；系统设计阶段额外输出 `evidence.architecture` 架构线索。
 - `scripts/sfk.py artifact impact <phase>` 提供只读下游影响分析，用于补充或变更需求/UI/系统设计时提示后续产出物复核风险。

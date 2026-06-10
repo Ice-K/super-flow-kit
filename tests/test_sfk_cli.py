@@ -57,8 +57,31 @@ def write_requirement_doc(project_dir: Path, rel_path: str = REQ_DOC) -> Path:
         "| --- | --- |\n"
         "| 模块 | 用户管理 |\n"
         "| 质量状态 | pending |\n\n"
-        "## 9. 需求范围\n\n"
-        "- 用户可以登录。\n\n"
+        "## 9. 项目/业务/代码上下文\n\n"
+        "当前模块用于管理用户登录和账号信息。\n\n"
+        "## 4. 背景与目标\n\n"
+        "为用户提供稳定的登录入口，并为后续权限能力奠定基础。\n\n"
+        "## 6. 用户画像与使用场景\n\n"
+        "普通用户在访问受保护功能前需要完成登录。\n\n"
+        "## 5. 功能范围\n\n"
+        "### 5.1 本期包含\n\n"
+        "- 用户可以使用账号和密码登录。\n\n"
+        "### 5.2 本期不包含\n\n"
+        "- 本期不包含第三方 OAuth 登录。\n\n"
+        "## 8. 用户故事\n\n"
+        "- 作为普通用户，我希望使用账号密码登录，以便访问个人功能。\n\n"
+        "## 7. 验收标准\n\n"
+        "- Given 用户输入有效账号密码，When 提交登录，Then 系统显示登录成功。\n\n"
+        "## 10. 非功能需求\n\n"
+        "登录反馈需要清晰，错误信息不能泄露敏感细节。\n\n"
+        "## 11. 下游影响分析\n\n"
+        "| 受影响阶段 | 影响说明 | 同步建议 |\n"
+        "| ---------- | -------- | -------- |\n"
+        "| UI 设计 | 需要设计登录表单和错误状态 | 执行 /sfk-ui |\n\n"
+        "## 12. 风险与待确认问题\n\n"
+        "| 问题 | 影响 | 建议处理方式 |\n"
+        "| ---- | ---- | ------------ |\n"
+        "| 密码策略待确认 | 影响校验规则 | 与用户确认后进入系统设计 |\n\n"
         "## 2. 变更记录\n\n"
         "| 时间 | 变更 | 负责人 |\n"
         "| --- | --- | --- |\n"
@@ -194,6 +217,7 @@ class SfkCliTests(unittest.TestCase):
 
             draft = run_sfk(project_dir, "artifact", "draft", "requirement", REQ_DOC)
             self.assertIn("documentCheck", draft.stdout)
+            self.assertIn("qualityCheck：passed", draft.stdout)
 
             state = self.module_state(project_dir)
             artifact = state["artifacts"]["requirement"]
@@ -205,7 +229,7 @@ class SfkCliTests(unittest.TestCase):
 
             text = doc_path.read_text(encoding="utf-8")
             self.assertIn("## 1. 文档信息", text)
-            self.assertIn("## 2. 需求范围", text)
+            self.assertIn("## 2. 项目/业务/代码上下文", text)
             self.assertIn("| 质量状态 | draft |", text)
 
             git_env = {
@@ -215,6 +239,7 @@ class SfkCliTests(unittest.TestCase):
             }
             confirmed = run_sfk(project_dir, "artifact", "confirm", "requirement", env=git_env)
             self.assertIn("documentCheck", confirmed.stdout)
+            self.assertIn("qualityCheck：passed", confirmed.stdout)
             self.assertIn("owner：Test Owner", confirmed.stdout)
 
             state = self.module_state(project_dir)
@@ -227,7 +252,100 @@ class SfkCliTests(unittest.TestCase):
             text = doc_path.read_text(encoding="utf-8")
             self.assertIn("| 质量状态 | confirmed |", text)
             self.assertIn("| 2026-06-10 | 创建需求草稿 | Test Owner |", text)
-            self.assertNotIn("待确认", text)
+            self.assertIn("密码策略待确认", text)
+
+    def test_requirement_artifact_requires_required_sections(self) -> None:
+        with self.make_project() as tmp:
+            project_dir = Path(tmp)
+            self.init_project(project_dir)
+            self.create_module(project_dir)
+            doc_path = project_dir / REQ_DOC
+            doc_path.parent.mkdir(parents=True, exist_ok=True)
+            doc_path.write_text(
+                "# 用户管理需求分析\n\n"
+                "## 文档信息\n\n"
+                "| 质量状态 | pending |\n\n"
+                "## 背景与目标\n\n"
+                "只包含背景，缺少其他必备章节。\n",
+                encoding="utf-8",
+            )
+
+            result = run_sfk(project_dir, "artifact", "draft", "requirement", REQ_DOC, check=False)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("需求分析文档质量检查未通过", result.stderr)
+            self.assertIn("缺少必备章节", result.stderr)
+            artifact = self.module_state(project_dir)["artifacts"]["requirement"]
+            self.assertEqual(artifact["status"], "pending")
+            self.assertEqual(artifact["files"], [])
+
+    def test_requirement_placeholder_warnings_block_confirm(self) -> None:
+        git_env = {
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "user.name",
+            "GIT_CONFIG_VALUE_0": "Test Owner",
+        }
+        with self.make_project() as tmp:
+            project_dir = Path(tmp)
+            self.init_project(project_dir)
+            self.create_module(project_dir)
+            doc_path = write_requirement_doc(project_dir)
+            text = doc_path.read_text(encoding="utf-8")
+            doc_path.write_text(
+                text.replace(
+                    "为用户提供稳定的登录入口，并为后续权限能力奠定基础。",
+                    "[说明为什么要做这个功能，以及期望达成什么业务或产品目标。]",
+                ),
+                encoding="utf-8",
+            )
+
+            draft = run_sfk(project_dir, "artifact", "draft", "requirement", REQ_DOC)
+            self.assertIn("qualityCheck：warnings", draft.stdout)
+            self.assertIn("模板占位符", draft.stdout)
+            confirm = run_sfk(project_dir, "artifact", "confirm", "requirement", check=False)
+            self.assertNotEqual(confirm.returncode, 0)
+            self.assertIn("模板占位符", confirm.stderr)
+            artifact = self.module_state(project_dir)["artifacts"]["requirement"]
+            self.assertEqual(artifact["status"], "in_progress")
+            self.assertEqual(artifact["quality"], "draft")
+
+            doc_path.write_text(
+                doc_path.read_text(encoding="utf-8").replace(
+                    "[说明为什么要做这个功能，以及期望达成什么业务或产品目标。]",
+                    "为用户提供稳定的登录入口，并为后续权限能力奠定基础。",
+                ),
+                encoding="utf-8",
+            )
+            confirmed = run_sfk(project_dir, "artifact", "confirm", "requirement", env=git_env)
+            self.assertIn("qualityCheck：passed", confirmed.stdout)
+            artifact = self.module_state(project_dir)["artifacts"]["requirement"]
+            self.assertEqual(artifact["status"], "done")
+            self.assertEqual(artifact["quality"], "confirmed")
+
+    def test_requirement_artifact_rejects_missing_empty_and_non_markdown_files(self) -> None:
+        with self.make_project() as tmp:
+            project_dir = Path(tmp)
+            self.init_project(project_dir)
+            self.create_module(project_dir)
+
+            missing = run_sfk(project_dir, "artifact", "draft", "requirement", REQ_DOC, check=False)
+            self.assertNotEqual(missing.returncode, 0)
+            self.assertIn("需求分析文档不存在", missing.stderr)
+
+            empty_path = project_dir / REQ_DOC
+            empty_path.parent.mkdir(parents=True, exist_ok=True)
+            empty_path.write_text("", encoding="utf-8")
+            empty = run_sfk(project_dir, "artifact", "draft", "requirement", REQ_DOC, check=False)
+            self.assertNotEqual(empty.returncode, 0)
+            self.assertIn("需求分析文档为空", empty.stderr)
+
+            text_path = f"docs/super-flow-kit/{MODULE_ID}/req.txt"
+            (project_dir / text_path).write_text("not markdown\n", encoding="utf-8")
+            non_md = run_sfk(project_dir, "artifact", "draft", "requirement", text_path, check=False)
+            self.assertNotEqual(non_md.returncode, 0)
+            self.assertIn("必须是 Markdown", non_md.stderr)
+            artifact = self.module_state(project_dir)["artifacts"]["requirement"]
+            self.assertEqual(artifact["status"], "pending")
+            self.assertEqual(artifact["files"], [])
 
     def test_init_is_idempotent_and_does_not_overwrite_existing_state(self) -> None:
         with self.make_project() as tmp:

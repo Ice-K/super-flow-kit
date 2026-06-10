@@ -89,6 +89,34 @@ MANIFEST_NAMES = {
 UI_EXTENSIONS = {".tsx", ".jsx", ".vue", ".svelte", ".html", ".css", ".scss", ".less"}
 CODE_EXTENSIONS = {".py", ".js", ".ts", ".tsx", ".jsx", ".vue", ".svelte", ".go", ".rs", ".java", ".kt", ".cs", ".php", ".rb"}
 UI_DIR_PARTS = {"app", "pages", "components", "layouts", "views", "routes", "styles", "assets", "public", "ui", "design"}
+REQUIREMENT_REQUIRED_SECTIONS = [
+    "文档信息",
+    "项目/业务/代码上下文",
+    "背景与目标",
+    "用户画像与使用场景",
+    "功能范围",
+    "用户故事",
+    "验收标准",
+    "非功能需求",
+    "下游影响分析",
+    "风险与待确认问题",
+    "变更记录",
+]
+REQUIREMENT_TEMPLATE_FIELDS = {
+    "displayName",
+    "moduleId",
+    "version",
+    "quality",
+    "createdAt",
+    "updatedAt",
+    "owner",
+}
+REQUIREMENT_BRACKET_PLACEHOLDER_RE = re.compile(
+    r"\[(?:全新项目|已有业务文档|已有代码|已有需求文档|列出|说明|从既有|"
+    r"用户角色|完成某件事|获得某种价值|前置条件|用户行为|预期结果|"
+    r"性能、安全、兼容性、可用性、可维护性等要求|UI 设计|系统设计|软件开发|功能测试|部署上线|"
+    r"待确认问题|影响|建议)[^\]]*\]"
+)
 SYSTEM_DESIGN_REQUIRED_SECTIONS = [
     "文档信息",
     "设计目标与范围",
@@ -124,6 +152,7 @@ SYSTEM_DESIGN_BRACKET_PLACEHOLDER_RE = re.compile(
     r"模块名称|职责|输入|输出|依赖|备注|实体名称|字段|创建/更新/删除/归档|存储或来源|约束|"
     r"接口名称|调用方|提供方|入参|出参|错误|权限|风险|影响|条件|缓解|问题|建议|是/否|动作)[^\]]*\]"
 )
+QUALITY_CHECK_PHASES = {"requirement", "system_design"}
 
 
 class SfkError(Exception):
@@ -309,6 +338,57 @@ def markdown_h2_titles(text: str) -> list[str]:
     return titles
 
 
+def detect_requirement_placeholders(text: str) -> list[str]:
+    placeholders: list[str] = []
+    seen: set[str] = set()
+    for line_number, line in enumerate(text.splitlines(), start=1):
+        for match in re.finditer(r"\{([A-Za-z][A-Za-z0-9_]*)\}", line):
+            if match.group(1) not in REQUIREMENT_TEMPLATE_FIELDS:
+                continue
+            item = f"第 {line_number} 行：{match.group(0)}"
+            if item not in seen:
+                placeholders.append(item)
+                seen.add(item)
+        for match in REQUIREMENT_BRACKET_PLACEHOLDER_RE.finditer(line):
+            item = f"第 {line_number} 行：{match.group(0)}"
+            if item not in seen:
+                placeholders.append(item)
+                seen.add(item)
+    return placeholders
+
+
+def validate_requirement_document(file_path: str, confirmed: bool) -> dict[str, list[str]]:
+    path = root() / file_path
+    errors: list[str] = []
+    warnings: list[str] = []
+    if not path.exists() or not path.is_file():
+        errors.append(f"需求分析文档不存在：{file_path}")
+        return {"errors": errors, "warnings": warnings}
+    if path.stat().st_size <= 0:
+        errors.append(f"需求分析文档为空：{file_path}")
+        return {"errors": errors, "warnings": warnings}
+    if path.suffix.lower() != ".md":
+        errors.append(f"需求分析文档必须是 Markdown 文件：{file_path}")
+        return {"errors": errors, "warnings": warnings}
+
+    text = path.read_text(encoding="utf-8")
+    titles = set(markdown_h2_titles(text))
+    missing_sections = [section for section in REQUIREMENT_REQUIRED_SECTIONS if section not in titles]
+    if missing_sections:
+        errors.append("需求分析文档缺少必备章节：" + "、".join(missing_sections))
+
+    placeholders = detect_requirement_placeholders(text)
+    if placeholders:
+        message = "需求分析文档仍包含模板占位符：" + "；".join(placeholders[:10])
+        if len(placeholders) > 10:
+            message += f"；另有 {len(placeholders) - 10} 处"
+        if confirmed:
+            errors.append(message)
+        else:
+            warnings.append(message)
+    return {"errors": errors, "warnings": warnings}
+
+
 def detect_system_design_placeholders(text: str) -> list[str]:
     placeholders: list[str] = []
     seen: set[str] = set()
@@ -358,6 +438,18 @@ def validate_system_design_document(file_path: str, confirmed: bool) -> dict[str
         else:
             warnings.append(message)
     return {"errors": errors, "warnings": warnings}
+
+
+def validate_artifact_quality_document(phase: str, file_path: str, confirmed: bool) -> dict[str, list[str]]:
+    if phase == "requirement":
+        return validate_requirement_document(file_path, confirmed)
+    if phase == "system_design":
+        return validate_system_design_document(file_path, confirmed)
+    return {"errors": [], "warnings": []}
+
+
+def artifact_quality_error_prefix(phase: str) -> str:
+    return f"{PHASE_NAMES[phase]}文档质量检查未通过："
 
 
 def enforce_hard_dependencies(state: dict[str, Any], phase: str) -> None:
@@ -1068,11 +1160,10 @@ def artifact_update(args: argparse.Namespace, confirmed: bool) -> None:
         files = artifact.get("files") or []
         if not files:
             raise SfkError("没有可确认的阶段产出物。请先保存草稿后再确认。")
-        if phase == "system_design":
-            quality_result = validate_system_design_document(files[-1], confirmed=True)
-            if quality_result["errors"]:
-                raise SfkError("系统设计文档质量检查未通过：" + "；".join(quality_result["errors"]))
-            quality_warnings = quality_result["warnings"]
+        quality_result = validate_artifact_quality_document(phase, files[-1], confirmed=True)
+        if quality_result["errors"]:
+            raise SfkError(artifact_quality_error_prefix(phase) + "；".join(quality_result["errors"]))
+        quality_warnings = quality_result["warnings"]
         owner = current_owner(index)
         artifact["status"] = "done"
         artifact["quality"] = "confirmed"
@@ -1084,11 +1175,10 @@ def artifact_update(args: argparse.Namespace, confirmed: bool) -> None:
     else:
         owner = None
         file_path = normalize_artifact_file(args.file)
-        if phase == "system_design":
-            quality_result = validate_system_design_document(file_path, confirmed=False)
-            if quality_result["errors"]:
-                raise SfkError("系统设计文档质量检查未通过：" + "；".join(quality_result["errors"]))
-            quality_warnings = quality_result["warnings"]
+        quality_result = validate_artifact_quality_document(phase, file_path, confirmed=False)
+        if quality_result["errors"]:
+            raise SfkError(artifact_quality_error_prefix(phase) + "；".join(quality_result["errors"]))
+        quality_warnings = quality_result["warnings"]
         artifact["status"] = "in_progress"
         artifact["quality"] = "draft"
         files = artifact.setdefault("files", [])
@@ -1127,7 +1217,7 @@ def artifact_update(args: argparse.Namespace, confirmed: bool) -> None:
             print(f"  - {fix}")
     else:
         print("documentCheck：passed")
-    if phase == "system_design":
+    if phase in QUALITY_CHECK_PHASES:
         if quality_warnings:
             print("qualityCheck：warnings")
             for warning in quality_warnings:
