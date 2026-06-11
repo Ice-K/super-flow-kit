@@ -1,8 +1,8 @@
-# super-flow-kit v0.1 MVP 实现计划
+# super-flow-kit 迭代记录与近期计划
 
 ## Context
 
-当前仓库已从文档型项目推进到实现阶段：`super-flow-kit.md` 已更新为 v3.1 规格文档，明确了 v0.1 MVP 范围、命令规格、状态 schema、交互流程和验收路径。远程仓库地址：`https://github.com/Ice-K/super-flow-kit.git`。
+本文件最初记录 `super-flow-kit` v0.1 MVP 实现计划；随着 v0.2 UI 设计、v0.3 系统设计和 v0.4 开发阶段切片推进，现在同时作为迭代记录与近期计划。`super-flow-kit.md` 仍是权威规格文档，远程仓库地址：`https://github.com/Ice-K/super-flow-kit.git`。
 
 目标是实现一个最小可用的 Claude Code 工作流插件，完成以下闭环：
 
@@ -33,6 +33,9 @@
 .claude/commands/sfk-module.md
 .claude/commands/sfk-config.md
 .claude/commands/sfk-req.md
+.claude/commands/sfk-ui.md
+.claude/commands/sfk-design.md
+.claude/commands/sfk-dev.md
 ```
 
 ### 脚本
@@ -49,6 +52,9 @@ scripts/sfk-config.sh
 
 ```text
 templates/requirement.md
+templates/ui-design.md
+templates/system-design.md
+templates/development.md
 ```
 
 ### 测试
@@ -123,11 +129,15 @@ python scripts/sfk.py status
 - REQ/UI 阶段增强上下文发现和影响分析：新增只读 `python scripts/sfk.py context discover --phase <phase>` 和 `python scripts/sfk.py artifact impact <phase>`，用于先识别全新/已有项目，再提示下游产出物复核风险。
 
 - v0.3 系统设计闭环实现 `/sfk-design`：基于已确认需求产出物进入系统设计阶段，可选结合 UI 设计和现有代码上下文，并复用通用 `artifact draft/confirm/current` 状态机；脚本层强制需求硬依赖、系统设计必备章节和确认前模板占位符清理。
+- v0.3.1 系统设计补强：将 API 设计和数据库设计作为系统设计必备内容，模板覆盖表结构、字段、关系、索引、迁移、接口清单、请求/响应、错误码、鉴权、分页、幂等、限流和外部集成。
+- v0.4 `/sfk-dev` 基础开发阶段计划：基于已确认需求和系统设计生成开发文档/开发计划，复用通用 `artifact draft/confirm/current` 状态机；本阶段不自动修改业务代码，不将开发文档确认等同于代码实现完成。
+- v0.4.1 源码实现二次确认门禁：开发文档 confirmed 后仍需通过 `scripts/sfk.py implementation approve development --summary ...` 记录实现授权；授权前不得修改业务源码，授权也不代表实现完成。
 - REQ 阶段补齐脚本层质量门禁：`artifact draft/confirm requirement` 会检查必备章节和模板占位符，输出 `qualityCheck`，确认前不得残留模板占位符。
 
 ## 不在本轮实现
 
-- 完整 `/sfk-dev`、`/sfk-test`、`/sfk-deploy` 流程。
+- 完整 `/sfk-test`、`/sfk-deploy` 流程。
+- 自动修改业务代码并验证真实实现完成的 `/sfk-dev` 增强流程。
 - `/sfk-export`。
 - `/sfk-reset`。
 - `/sfk-code-review`。

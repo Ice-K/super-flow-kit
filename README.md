@@ -2,10 +2,10 @@
 
 `super-flow-kit` 是一个面向 Claude Code 的结构化软件交付工作流插件，目标是帮助用户从需求分析到部署上线，按阶段沉淀项目上下文、产出物和工作流状态。
 
-当前版本从 **v0.1 MVP** 继续演进，已覆盖需求分析、UI 设计和系统设计的窄范围闭环：
+当前版本从 **v0.1 MVP** 继续演进，已覆盖需求分析、UI 设计和系统设计闭环，并开始进入 v0.4 开发阶段计划：
 
 ```text
-初始化项目 → 创建模块 → 需求分析 → UI 设计 → 系统设计 → 保存产出物 → 查看状态看板
+初始化项目 → 创建模块 → 需求分析 → UI 设计 → 系统设计 → 开发计划 → 保存产出物 → 查看状态看板
 ```
 
 ## 当前状态
@@ -30,9 +30,25 @@ v0.3 系统设计闭环已实现：
 - `/sfk-design` — 进入系统设计阶段，基于已确认需求并可选结合 UI/代码上下文生成或更新系统设计文档。
 - 脚本层会强制系统设计依赖已确认且可用的需求产出物；草稿必须包含系统设计必备章节，确认时不得残留模板占位符。
 
+v0.3.1 系统设计补强已实现：
+
+- 系统设计模板明确包含数据库设计和 API / 接口设计。
+- 数据库设计覆盖概念模型、表结构、字段、关系、索引、唯一约束、生命周期和迁移策略；不涉及数据库时也必须显式说明。
+- API / 接口设计覆盖接口清单、请求/响应、错误码、鉴权、分页/排序/过滤、幂等、限流和外部集成。
+
+v0.4 基础开发阶段已实现：
+
+- `/sfk-dev` — 进入软件开发阶段，基于已确认需求和系统设计生成或更新开发文档/开发计划。
+- v0.4 只建立开发阶段产出物闭环，不自动修改业务代码，也不把开发文档确认等同于代码实现完成。
+
+v0.4.1 源码实现二次确认门禁已实现：
+
+- 开发文档 confirmed 后，源码实现仍需要单独通过 `/sfk-dev` 的 Gate C 二次确认。
+- `scripts/sfk.py implementation approve development --summary ...` 会记录实现授权；授权前 `/sfk-dev` 不得修改业务源码。
+- 实现授权只表示允许开始按开发文档修改源码，不代表源码已经实现完成。
+
 暂未完整实现：
 
-- `/sfk-dev`
 - `/sfk-test`
 - `/sfk-deploy`
 - `/sfk-export`
@@ -49,9 +65,9 @@ v0.3 系统设计闭环已实现：
 需求分析 → UI 设计 → 系统设计 → 软件开发 → 功能测试 → 部署上线
 ```
 
-v0.1 完整实现 **需求分析** 阶段；v0.2 以 `/sfk-ui` 形式实现 **UI 设计** 的窄范围切片；v0.3 以 `/sfk-design` 形式实现带脚本层兜底的 **系统设计** 闭环。后续开发、测试和部署阶段已在规格和状态模型中预留。
+v0.1 完整实现 **需求分析** 阶段；v0.2 以 `/sfk-ui` 形式实现 **UI 设计** 的窄范围切片；v0.3 以 `/sfk-design` 形式实现带脚本层兜底的 **系统设计** 闭环；v0.3.1 补强系统设计中的 **数据库设计** 和 **API / 接口设计**；v0.4 以 `/sfk-dev` 启动 **软件开发计划** 产出物闭环。后续测试和部署阶段已在规格和状态模型中预留。
 
-## MVP 使用路径
+## 推荐使用路径
 
 在 Claude Code 中使用：
 
@@ -63,6 +79,9 @@ v0.1 完整实现 **需求分析** 阶段；v0.2 以 `/sfk-ui` 形式实现 **UI
 /sfk
 /sfk-status
 /sfk-req 开发用户登录功能
+/sfk-ui 设计用户登录界面
+/sfk-design 设计用户管理系统架构
+/sfk-dev 制定用户管理开发计划
 ```
 
 在 slash command 交互中，`/sfk-module create 用户管理` 会先由 Claude 根据语义推荐合法的 `moduleId`（如 `user-management`），再调用底层脚本；如无法可靠推荐，可使用 `--id` 显式指定。
@@ -95,7 +114,8 @@ v0.1 完整实现 **需求分析** 阶段；v0.2 以 `/sfk-ui` 形式实现 **UI
     ├── sfk-config.md
     ├── sfk-req.md
     ├── sfk-ui.md
-    └── sfk-design.md
+    ├── sfk-design.md
+    └── sfk-dev.md
 
 scripts/
 ├── sfk.py
@@ -111,7 +131,8 @@ tests/
 templates/
 ├── requirement.md
 ├── ui-design.md
-└── system-design.md
+├── system-design.md
+└── development.md
 
 docs/
 └── MVP-PLAN.md
@@ -135,7 +156,8 @@ docs/
     └── {moduleId}/
         ├── yyyyMMddHHmmss-{moduleId}-需求分析.md
         ├── yyyyMMddHHmmss-{moduleId}-UI设计.md
-        └── yyyyMMddHHmmss-{moduleId}-系统设计.md
+        ├── yyyyMMddHHmmss-{moduleId}-系统设计.md
+        └── yyyyMMddHHmmss-{moduleId}-开发文档.md
 ```
 
 这些运行时状态默认被 `.gitignore` 忽略：
@@ -170,11 +192,17 @@ python scripts/sfk.py artifact current requirement
 python scripts/sfk.py context discover --phase requirement
 python scripts/sfk.py context discover --phase ui_design
 python scripts/sfk.py context discover --phase system_design
+python scripts/sfk.py context discover --phase development
 python scripts/sfk.py artifact impact requirement
 python scripts/sfk.py artifact impact system_design
+python scripts/sfk.py artifact impact development
 python scripts/sfk.py phase check ui_design
 python scripts/sfk.py phase check system_design
+python scripts/sfk.py phase check development
 python scripts/sfk.py artifact current system_design
+python scripts/sfk.py artifact current development
+python scripts/sfk.py implementation current development
+python scripts/sfk.py implementation approve development --summary "按已确认开发文档开始实现"
 python scripts/sfk.py tui select --title "选择方案" --mode single --option mvp="MVP 方案" --option full="完整方案"
 python scripts/sfk.py status
 ```
@@ -205,7 +233,9 @@ rm -rf .sfk docs/super-flow-kit
 - `scripts/sfk.py phase check <phase>` 提供只读阶段依赖检查；`ui_design` 对 `requirement` 是软依赖，可带假设继续，`system_design` 等后续阶段会按硬依赖阻塞；`artifact draft/confirm` 写入层也会强制硬依赖。
 - `scripts/sfk.py context discover --phase <phase>` 提供只读上下文发现，用于区分全新项目、已有业务文档、已有代码和已有 UI 代码；系统设计阶段额外输出 `evidence.architecture` 架构线索。
 - `scripts/sfk.py artifact impact <phase>` 提供只读下游影响分析，用于补充或变更需求/UI/系统设计时提示后续产出物复核风险。
-- `/sfk-design` 草稿必须包含系统设计必备章节；确认时不得残留模板占位符，否则脚本会拒绝更新为 `done/confirmed`。
+- `/sfk-design` 草稿必须包含系统设计必备章节，尤其是数据库设计和 API / 接口设计；确认时不得残留模板占位符，否则脚本会拒绝更新为 `done/confirmed`。
+- `/sfk-dev` 草稿必须包含开发文档必备章节；确认时不得残留模板占位符。v0.4 的 `/sfk-dev` 只确认开发计划产出物，不代表业务代码已经实现。
+- `/sfk-dev` 源码实现前必须通过 `scripts/sfk.py implementation approve development --summary ...` 记录二次确认；`implementationApproval.status = approved` 只表示允许开始实现，不表示实现完成。
 - `/sfk-req` 在写入草稿前会展示所有问题与用户选择，并提供确认、修改、回退、重选和取消分支。
 - `scripts/sfk.py tui select` 是无状态的通用交互选择能力；slash command 仍保留文本/编号选择作为兜底。
 

@@ -126,7 +126,7 @@ SYSTEM_DESIGN_REQUIRED_SECTIONS = [
     "技术选型",
     "系统架构",
     "模块划分",
-    "数据模型",
+    "数据库设计",
     "API / 接口设计",
     "权限与安全",
     "错误处理与可观测性",
@@ -150,9 +150,52 @@ SYSTEM_DESIGN_BRACKET_PLACEHOLDER_RE = re.compile(
     r"\[(?:说明|引用|列出|全新项目|已有业务文档|已有代码|已有 UI 代码|"
     r"语言/框架/存储/队列/缓存/测试/部署|选型|理由|备选|待确认|"
     r"模块名称|职责|输入|输出|依赖|备注|实体名称|字段|创建/更新/删除/归档|存储或来源|约束|"
-    r"接口名称|调用方|提供方|入参|出参|错误|权限|风险|影响|条件|缓解|问题|建议|是/否|动作)[^\]]*\]"
+    r"实体名称|关键属性|表名|主键字段|字段名|字段类型|默认值|约束或业务含义|"
+    r"一对多/唯一索引/普通索引/外键/复合约束|数据对象|创建时机|更新规则|删除或归档策略|迁移、回填或兼容策略|"
+    r"接口名称|调用方|提供方|入参|出参|错误|权限|GET/POST/事件/RPC|路径或主题|权限要求|"
+    r"字段、类型、必填性|字段、类型、状态|错误码或状态|反馈文案|重试/修正/联系支持|"
+    r"认证方式|角色/权限/数据范围|审计记录|幂等键/去重规则|限流或防重策略|外部系统/事件|入站/出站|协议和数据格式|重试/补偿|版本或兼容性说明|"
+    r"风险|影响|条件|缓解|问题|建议|是/否|动作)[^\]]*\]"
 )
-QUALITY_CHECK_PHASES = {"requirement", "system_design"}
+DEVELOPMENT_REQUIRED_SECTIONS = [
+    "文档信息",
+    "开发目标与范围",
+    "需求依据",
+    "系统设计依据",
+    "API 设计依据",
+    "数据库设计依据",
+    "UI / 交互依据",
+    "项目代码现状与约束",
+    "实现任务拆解",
+    "关键文件与改动计划",
+    "接口 / 数据 / 状态变更",
+    "错误处理、安全与可观测性",
+    "测试与验证计划",
+    "开发顺序与回滚策略",
+    "实现前确认",
+    "风险与待确认问题",
+    "下游影响分析",
+    "变更记录",
+]
+DEVELOPMENT_TEMPLATE_FIELDS = {
+    "displayName",
+    "moduleId",
+    "version",
+    "quality",
+    "createdAt",
+    "updatedAt",
+    "owner",
+}
+DEVELOPMENT_BRACKET_PLACEHOLDER_RE = re.compile(
+    r"\[(?:说明|引用|列出|全新项目|已有代码|已有 UI 代码|已有业务文档|"
+    r"接口名称|新增/修改/复用/不涉及|请求、响应或事件载荷|错误码、鉴权、权限|备注|"
+    r"表或数据对象|字段、索引、唯一约束|迁移、回填、兼容或不涉及|"
+    r"任务名称|目标|步骤|依赖|完成标准|路径|新增/修改/删除/不涉及|说明计划改动|风险|"
+    r"变更项|接口/数据/状态/配置|影响范围|兼容或迁移策略|"
+    r"单元测试/集成测试/手工验证/静态检查|覆盖范围|通过标准|序号|开发动作|前置条件|回滚或恢复方式|"
+    r"待确认问题|影响|建议|是/否|原因|动作)[^\]]*\]"
+)
+QUALITY_CHECK_PHASES = {"requirement", "system_design", "development"}
 
 
 class SfkError(Exception):
@@ -440,11 +483,64 @@ def validate_system_design_document(file_path: str, confirmed: bool) -> dict[str
     return {"errors": errors, "warnings": warnings}
 
 
+def detect_development_placeholders(text: str) -> list[str]:
+    placeholders: list[str] = []
+    seen: set[str] = set()
+    for line_number, line in enumerate(text.splitlines(), start=1):
+        for match in re.finditer(r"\{([A-Za-z][A-Za-z0-9_]*)\}", line):
+            if match.group(1) not in DEVELOPMENT_TEMPLATE_FIELDS:
+                continue
+            item = f"第 {line_number} 行：{match.group(0)}"
+            if item not in seen:
+                placeholders.append(item)
+                seen.add(item)
+        for match in DEVELOPMENT_BRACKET_PLACEHOLDER_RE.finditer(line):
+            item = f"第 {line_number} 行：{match.group(0)}"
+            if item not in seen:
+                placeholders.append(item)
+                seen.add(item)
+    return placeholders
+
+
+def validate_development_document(file_path: str, confirmed: bool) -> dict[str, list[str]]:
+    path = root() / file_path
+    errors: list[str] = []
+    warnings: list[str] = []
+    if not path.exists() or not path.is_file():
+        errors.append(f"开发文档不存在：{file_path}")
+        return {"errors": errors, "warnings": warnings}
+    if path.stat().st_size <= 0:
+        errors.append(f"开发文档为空：{file_path}")
+        return {"errors": errors, "warnings": warnings}
+    if path.suffix.lower() != ".md":
+        errors.append(f"开发文档必须是 Markdown 文件：{file_path}")
+        return {"errors": errors, "warnings": warnings}
+
+    text = path.read_text(encoding="utf-8")
+    titles = set(markdown_h2_titles(text))
+    missing_sections = [section for section in DEVELOPMENT_REQUIRED_SECTIONS if section not in titles]
+    if missing_sections:
+        errors.append("开发文档缺少必备章节：" + "、".join(missing_sections))
+
+    placeholders = detect_development_placeholders(text)
+    if placeholders:
+        message = "开发文档仍包含模板占位符：" + "；".join(placeholders[:10])
+        if len(placeholders) > 10:
+            message += f"；另有 {len(placeholders) - 10} 处"
+        if confirmed:
+            errors.append(message)
+        else:
+            warnings.append(message)
+    return {"errors": errors, "warnings": warnings}
+
+
 def validate_artifact_quality_document(phase: str, file_path: str, confirmed: bool) -> dict[str, list[str]]:
     if phase == "requirement":
         return validate_requirement_document(file_path, confirmed)
     if phase == "system_design":
         return validate_system_design_document(file_path, confirmed)
+    if phase == "development":
+        return validate_development_document(file_path, confirmed)
     return {"errors": [], "warnings": []}
 
 
@@ -799,6 +895,47 @@ def artifact_summary(artifact: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def implementation_approval_status(state: dict[str, Any]) -> dict[str, Any]:
+    development = state.get("artifacts", {}).get("development", {})
+    approval = ensure_implementation_approval(development)
+    summary = artifact_summary(development)
+    confirmed_at = development.get("confirmedAt")
+    current_file = summary["currentFile"]
+
+    reason = "implementation_approval_pending"
+    can_implement = False
+    if not current_file:
+        reason = "development_document_missing"
+    elif development.get("status") != "done" or development.get("quality") != "confirmed":
+        reason = "development_document_draft"
+    elif summary["missingFiles"]:
+        reason = "development_document_file_missing"
+    elif summary["emptyFiles"]:
+        reason = "development_document_file_empty"
+    elif approval.get("status") != "approved":
+        reason = "implementation_approval_pending"
+    elif approval.get("approvedForFile") != current_file or approval.get("approvedForConfirmedAt") != confirmed_at:
+        reason = "implementation_approval_stale"
+    else:
+        reason = "approved"
+        can_implement = True
+
+    return {
+        "developmentArtifact": {
+            "status": development.get("status", "pending"),
+            "quality": development.get("quality"),
+            "currentFile": current_file,
+            "confirmedAt": confirmed_at,
+            "hasUsableFile": summary["hasUsableFile"],
+            "missingFiles": summary["missingFiles"],
+            "emptyFiles": summary["emptyFiles"],
+        },
+        "implementationApproval": approval,
+        "canImplement": can_implement,
+        "reason": reason,
+    }
+
+
 def downstream_phases(phase: str) -> list[str]:
     validate_phase(phase)
     phase_ids = [phase_id for phase_id, _ in PHASES]
@@ -825,7 +962,9 @@ def artifact_impact_report(state: dict[str, Any], phase: str) -> dict[str, Any]:
             elif phase == "ui_design":
                 reason = "UI 设计变更可能影响前端实现、测试用例、交互验收和可访问性检查。"
             elif phase == "system_design":
-                reason = "系统设计变更可能影响开发实现、接口/数据模型、测试覆盖、部署配置、监控和回滚策略。"
+                reason = "系统设计变更可能影响开发实现、API / 接口设计、数据库设计、测试覆盖、部署配置、监控和回滚策略。"
+            elif phase == "development":
+                reason = "开发文档变更可能影响测试覆盖、测试用例、部署配置、数据迁移、监控和回滚策略。"
             else:
                 reason = f"{PHASE_NAMES[phase]} 变更可能影响该阶段产出物。"
             if summary["missingFiles"]:
@@ -867,8 +1006,35 @@ def suggest_module_id(display_name: str) -> str:
     )
 
 
-def phase_template() -> dict[str, Any]:
+def default_implementation_approval() -> dict[str, Any]:
     return {
+        "required": True,
+        "status": "pending",
+        "approvedAt": None,
+        "approvedBy": None,
+        "approvedForFile": None,
+        "approvedForConfirmedAt": None,
+        "summary": None,
+    }
+
+
+def ensure_implementation_approval(artifact: dict[str, Any]) -> dict[str, Any]:
+    approval = artifact.get("implementationApproval")
+    if not isinstance(approval, dict):
+        approval = default_implementation_approval()
+        artifact["implementationApproval"] = approval
+    default = default_implementation_approval()
+    for key, value in default.items():
+        approval.setdefault(key, value)
+    return approval
+
+
+def reset_implementation_approval(artifact: dict[str, Any]) -> None:
+    artifact["implementationApproval"] = default_implementation_approval()
+
+
+def phase_template() -> dict[str, Any]:
+    artifacts = {
         phase_id: {
             "status": "pending",
             "quality": None,
@@ -880,6 +1046,8 @@ def phase_template() -> dict[str, Any]:
         }
         for phase_id, _ in PHASES
     }
+    artifacts["development"]["implementationApproval"] = default_implementation_approval()
+    return artifacts
 
 
 def new_state(module_id: str, display_name: str) -> dict[str, Any]:
@@ -1021,7 +1189,7 @@ def module_switch(args: argparse.Namespace) -> None:
     print("下一步建议：/sfk-status")
 
 
-def phase_summary(artifact: dict[str, Any]) -> str:
+def phase_summary(artifact: dict[str, Any], phase: str | None = None) -> str:
     status = artifact.get("status", "pending")
     quality = artifact.get("quality")
     files = artifact.get("files") or []
@@ -1032,7 +1200,11 @@ def phase_summary(artifact: dict[str, Any]) -> str:
         health = artifact_files_health(files)
         if not health["hasUsableFile"]:
             warning = " ⚠️ 产出物文件缺失或为空"
-    return f"{status}{quality_text} {file_text}{warning}".rstrip()
+    approval_text = ""
+    if phase == "development":
+        approval = ensure_implementation_approval(artifact)
+        approval_text = f" 实现授权:{approval.get('status', 'pending')}"
+    return f"{status}{quality_text} {file_text}{approval_text}{warning}".rstrip()
 
 
 def next_step_suggestion(state: dict[str, Any]) -> str:
@@ -1040,12 +1212,22 @@ def next_step_suggestion(state: dict[str, Any]) -> str:
     requirement = artifacts.get("requirement", {})
     ui_design = artifacts.get("ui_design", {})
     system_design = artifacts.get("system_design", {})
+    development = artifacts.get("development", {})
     if not artifact_is_satisfied(requirement):
         if requirement.get("status") == "in_progress" or requirement.get("quality") == "draft":
             return "💡 下一步建议：继续使用 /sfk-req 完善并确认需求草稿。"
         return "💡 下一步建议：/sfk-req <需求描述>"
     if artifact_is_satisfied(system_design):
-        return "💡 下一步建议：/sfk-dev（后续阶段预留，尚未完整实现）"
+        if artifact_is_satisfied(development):
+            approval_status = implementation_approval_status(state)
+            if approval_status["canImplement"]:
+                return "💡 下一步建议：源码实现已获授权，可按开发文档开始实现；完成后建议进入 /sfk-test（后续阶段预留，尚未完整实现）。"
+            if approval_status["reason"] == "implementation_approval_stale":
+                return "💡 下一步建议：开发文档已更新，请使用 /sfk-dev 重新进行源码实现二次确认。"
+            return "💡 下一步建议：使用 /sfk-dev 进行源码实现二次确认；开发文档 confirmed 不代表已授权修改源码。"
+        if development.get("status") == "in_progress" or development.get("quality") == "draft":
+            return "💡 下一步建议：继续使用 /sfk-dev 完善并确认开发文档草稿。"
+        return "💡 下一步建议：/sfk-dev"
     if system_design.get("status") == "in_progress" or system_design.get("quality") == "draft":
         return "💡 下一步建议：继续使用 /sfk-design 完善并确认系统设计草稿。"
     if not artifact_is_satisfied(ui_design):
@@ -1070,7 +1252,7 @@ def module_status(_: argparse.Namespace) -> None:
     print("阶段状态：")
     artifacts = state.get("artifacts", {})
     for phase_id, phase_name in PHASES:
-        print(f"  - {phase_name}：{phase_summary(artifacts.get(phase_id, {}))}")
+        print(f"  - {phase_name}：{phase_summary(artifacts.get(phase_id, {}), phase_id)}")
     print_dependency_warnings(state)
 
 
@@ -1103,7 +1285,7 @@ def render_status(_: argparse.Namespace) -> None:
     print(f"\n📋 当前模块详情：{module.get('displayName')}（{module_id}）")
     artifacts = state.get("artifacts", {})
     for phase_id, phase_name in PHASES:
-        print(f"  - {phase_name}：{phase_summary(artifacts.get(phase_id, {}))}")
+        print(f"  - {phase_name}：{phase_summary(artifacts.get(phase_id, {}), phase_id)}")
     print_dependency_warnings(state)
     print(f"\n{next_step_suggestion(state)}")
 
@@ -1170,6 +1352,8 @@ def artifact_update(args: argparse.Namespace, confirmed: bool) -> None:
         artifact["confirmedAt"] = timestamp
         artifact["owner"] = owner
         artifact["version"] = artifact.get("version") or "1.0.0"
+        if phase == "development":
+            ensure_implementation_approval(artifact)
         action = f"confirm_{phase}"
         detail = f"确认阶段产出物：{phase}"
     else:
@@ -1186,6 +1370,8 @@ def artifact_update(args: argparse.Namespace, confirmed: bool) -> None:
             files.append(file_path)
         artifact["confirmedAt"] = None
         artifact["version"] = artifact.get("version") or "0.1.0"
+        if phase == "development":
+            reset_implementation_approval(artifact)
         action = f"draft_{phase}"
         detail = f"保存阶段草稿：{phase}"
     artifact["updatedAt"] = timestamp
@@ -1246,6 +1432,70 @@ def artifact_impact(args: argparse.Namespace) -> None:
     result = artifact_impact_report(state, args.phase)
     result["moduleId"] = module_id
     print(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+def implementation_current(args: argparse.Namespace) -> None:
+    if args.phase != "development":
+        raise SfkError("当前仅支持查看 development 阶段的源码实现授权状态。")
+    _, state, module_id = require_current_state()
+    result = implementation_approval_status(state)
+    result["moduleId"] = module_id
+    result["phase"] = "development"
+    result["phaseName"] = PHASE_NAMES["development"]
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+def implementation_approve(args: argparse.Namespace) -> None:
+    if args.phase != "development":
+        raise SfkError("当前仅支持批准 development 阶段的源码实现。")
+    summary = args.summary.strip()
+    if not summary:
+        raise SfkError("源码实现授权摘要不能为空，请说明本次允许实现的范围。")
+    index, state, module_id = require_current_state()
+    development = state.setdefault("artifacts", {}).setdefault("development", {})
+    status = implementation_approval_status(state)
+    if status["reason"] in {
+        "development_document_missing",
+        "development_document_draft",
+        "development_document_file_missing",
+        "development_document_file_empty",
+    }:
+        raise SfkError(f"开发文档尚未满足源码实现授权条件：{status['reason']}")
+    approval = ensure_implementation_approval(development)
+    if status["canImplement"]:
+        print("✅ 源码实现授权已存在。")
+        print(f"approvedBy：{approval.get('approvedBy')}")
+        print(f"approvedAt：{approval.get('approvedAt')}")
+        print("提示：未覆盖既有授权。")
+        return
+    timestamp = now_iso()
+    owner = current_owner(index)
+    current_file = status["developmentArtifact"]["currentFile"]
+    approval.update({
+        "required": True,
+        "status": "approved",
+        "approvedAt": timestamp,
+        "approvedBy": owner,
+        "approvedForFile": current_file,
+        "approvedForConfirmedAt": status["developmentArtifact"].get("confirmedAt"),
+        "summary": summary,
+    })
+    state.setdefault("module", {})["updatedAt"] = timestamp
+    state.setdefault("history", []).append({
+        "action": "approve_development_implementation",
+        "timestamp": timestamp,
+        "user": owner,
+        "detail": summary,
+        "files": [current_file] if current_file else [],
+    })
+    write_json(state_path(module_id), state)
+    index.setdefault("modules", {}).setdefault(module_id, {})["updatedAt"] = timestamp
+    index.setdefault("project", {})["updatedAt"] = timestamp
+    write_json(index_path(), index)
+    print("✅ 源码实现二次确认已记录。")
+    print("提示：现在可以按已确认开发文档开始修改源码；这不代表源码已经实现完成。")
+    print(f"approvedBy：{owner}")
+    print(f"approvedForFile：{current_file}")
 
 
 def tui_select(args: argparse.Namespace) -> None:
@@ -1318,6 +1568,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_phase_check = phase_sub.add_parser("check")
     p_phase_check.add_argument("phase")
     p_phase_check.set_defaults(func=phase_check)
+
+    p_impl = sub.add_parser("implementation")
+    impl_sub = p_impl.add_subparsers(dest="implementation_command", required=True)
+    p_impl_current = impl_sub.add_parser("current")
+    p_impl_current.add_argument("phase")
+    p_impl_current.set_defaults(func=implementation_current)
+    p_impl_approve = impl_sub.add_parser("approve")
+    p_impl_approve.add_argument("phase")
+    p_impl_approve.add_argument("--summary", required=True)
+    p_impl_approve.set_defaults(func=implementation_approve)
 
     p_tui = sub.add_parser("tui")
     tui_sub = p_tui.add_subparsers(dest="tui_command", required=True)

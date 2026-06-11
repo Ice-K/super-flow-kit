@@ -17,6 +17,7 @@ MODULE_NAME = "用户管理"
 REQ_DOC = f"docs/super-flow-kit/{MODULE_ID}/20260610120000-{MODULE_ID}-需求分析.md"
 UI_DOC = f"docs/super-flow-kit/{MODULE_ID}/20260610123000-{MODULE_ID}-UI设计.md"
 SYS_DOC = f"docs/super-flow-kit/{MODULE_ID}/20260610130000-{MODULE_ID}-系统设计.md"
+DEV_DOC = f"docs/super-flow-kit/{MODULE_ID}/20260610133000-{MODULE_ID}-开发文档.md"
 
 
 def run_sfk(project_dir: Path, *args: str, check: bool = True, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
@@ -136,10 +137,32 @@ def write_system_design_doc(project_dir: Path, rel_path: str = SYS_DOC) -> Path:
         "登录请求经由命令入口进入状态工具。\n\n"
         "## 10. 模块划分\n\n"
         "状态工具负责 JSON 读写，命令文档负责交互流程。\n\n"
-        "## 11. 数据模型\n\n"
-        "模块状态记录阶段、产出物、版本和历史。\n\n"
+        "## 11. 数据库设计\n\n"
+        "### 11.1 概念数据模型\n\n"
+        "用户实体记录账号、登录凭据摘要和账号状态。\n\n"
+        "### 11.2 表结构设计\n\n"
+        "| 表 | 用途 | 主键 | 重要字段 | 关联表 |\n"
+        "| --- | --- | --- | --- | --- |\n"
+        "| users | 保存用户账号 | id | username、password_hash、status | 无 |\n\n"
+        "### 11.3 字段说明\n\n"
+        "username 唯一且必填，password_hash 只保存哈希摘要。\n\n"
+        "### 11.4 关系、索引与唯一约束\n\n"
+        "users.username 需要唯一索引，便于登录查询和冲突校验。\n\n"
+        "### 11.5 数据生命周期与迁移策略\n\n"
+        "用户创建后可更新状态，删除采用软删除或归档策略。\n\n"
         "## 12. API / 接口设计\n\n"
-        "CLI 接口通过 artifact draft 和 artifact confirm 更新产出物状态。\n\n"
+        "### 12.1 接口清单\n\n"
+        "POST /api/login 由登录页调用认证服务，需要匿名访问权限。\n\n"
+        "### 12.2 请求 / 响应结构\n\n"
+        "请求包含 username 和 password，响应包含登录结果和用户摘要。\n\n"
+        "### 12.3 错误码与异常响应\n\n"
+        "INVALID_CREDENTIALS 表示账号或密码错误，用户可见反馈保持模糊。\n\n"
+        "### 12.4 鉴权与权限控制\n\n"
+        "登录接口匿名可访问，成功后签发会话凭证。\n\n"
+        "### 12.5 分页、排序、过滤、幂等与限流\n\n"
+        "登录接口不分页，需要限流和防暴力破解。\n\n"
+        "### 12.6 外部集成 / 事件 / Webhook\n\n"
+        "本期不涉及外部集成。\n\n"
         "## 13. 权限与安全\n\n"
         "产出物路径必须位于项目根目录内。\n\n"
         "## 14. 错误处理与可观测性\n\n"
@@ -158,6 +181,57 @@ def write_system_design_doc(project_dir: Path, rel_path: str = SYS_DOC) -> Path:
         "| 时间 | 变更 | 负责人 |\n"
         "| --- | --- | --- |\n"
         "| 2026-06-10 | 创建系统设计草稿 | 待确认 |\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def write_development_doc(project_dir: Path, rel_path: str = DEV_DOC) -> Path:
+    path = project_dir / rel_path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "# 用户管理开发文档\n\n"
+        "## 4. 文档信息\n\n"
+        "| 字段 | 值 |\n"
+        "| --- | --- |\n"
+        "| 模块 | 用户管理 |\n"
+        "| 质量状态 | pending |\n\n"
+        "## 9. 开发目标与范围\n\n"
+        "实现用户登录开发计划，不直接声明代码已经完成。\n\n"
+        "## 3. 需求依据\n\n"
+        "依据已确认的需求分析文档。\n\n"
+        "## 5. 系统设计依据\n\n"
+        "依据已确认的系统设计文档。\n\n"
+        "## 6. API 设计依据\n\n"
+        "POST /api/login 接收账号密码并返回登录结果。\n\n"
+        "## 7. 数据库设计依据\n\n"
+        "users 表保存账号、密码摘要和状态，username 唯一。\n\n"
+        "## 8. UI / 交互依据\n\n"
+        "登录页提交账号密码并展示错误反馈。\n\n"
+        "## 10. 项目代码现状与约束\n\n"
+        "现有代码需要延续状态工具和命令文档分层。\n\n"
+        "## 11. 实现任务拆解\n\n"
+        "先实现状态校验，再补充接口处理和验证计划。\n\n"
+        "## 12. 关键文件与改动计划\n\n"
+        "计划修改服务层、接口层和测试文件。\n\n"
+        "## 13. 接口 / 数据 / 状态变更\n\n"
+        "新增登录接口并读取 users 数据。\n\n"
+        "## 14. 错误处理、安全与可观测性\n\n"
+        "错误信息不泄露敏感细节，记录必要审计日志。\n\n"
+        "## 15. 测试与验证计划\n\n"
+        "覆盖成功登录、失败登录和限流场景。\n\n"
+        "## 16. 开发顺序与回滚策略\n\n"
+        "先增加测试，再实现接口；回滚时移除接口入口。\n\n"
+        "## 17. 实现前确认\n\n"
+        "开发文档确认不代表授权修改源码，源码实现需要二次确认。\n\n"
+        "## 18. 风险与待确认问题\n\n"
+        "密码策略仍需业务确认。\n\n"
+        "## 19. 下游影响分析\n\n"
+        "开发文档会影响测试覆盖和部署检查。\n\n"
+        "## 1. 变更记录\n\n"
+        "| 时间 | 变更 | 负责人 |\n"
+        "| --- | --- | --- |\n"
+        "| 2026-06-10 | 创建开发草稿 | 待确认 |\n",
         encoding="utf-8",
     )
     return path
@@ -633,6 +707,8 @@ class SfkCliTests(unittest.TestCase):
             result = run_sfk(project_dir, "artifact", "draft", "system_design", SYS_DOC, check=False)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("缺少必备章节", result.stderr)
+            self.assertIn("数据库设计", result.stderr)
+            self.assertIn("API / 接口设计", result.stderr)
             artifact = self.module_state(project_dir)["artifacts"]["system_design"]
             self.assertEqual(artifact["status"], "pending")
             self.assertEqual(artifact["files"], [])
@@ -667,6 +743,249 @@ class SfkCliTests(unittest.TestCase):
             confirmed = run_sfk(project_dir, "artifact", "confirm", "system_design", env=git_env)
             self.assertIn("qualityCheck：passed", confirmed.stdout)
 
+    def test_development_artifact_enforces_hard_requirement_and_system_design_dependencies(self) -> None:
+        git_env = {
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "user.name",
+            "GIT_CONFIG_VALUE_0": "Test Owner",
+        }
+        with self.make_project() as tmp:
+            project_dir = Path(tmp)
+            self.init_project(project_dir)
+            self.create_module(project_dir)
+            write_development_doc(project_dir)
+
+            missing = run_sfk(project_dir, "artifact", "draft", "development", DEV_DOC, check=False)
+            self.assertNotEqual(missing.returncode, 0)
+            self.assertIn("硬依赖未满足", missing.stderr)
+            artifact = self.module_state(project_dir)["artifacts"]["development"]
+            self.assertEqual(artifact["status"], "pending")
+            self.assertEqual(artifact["files"], [])
+
+            write_requirement_doc(project_dir)
+            run_sfk(project_dir, "artifact", "draft", "requirement", REQ_DOC)
+            run_sfk(project_dir, "artifact", "confirm", "requirement", env=git_env)
+            missing_system = run_sfk(project_dir, "artifact", "draft", "development", DEV_DOC, check=False)
+            self.assertNotEqual(missing_system.returncode, 0)
+            self.assertIn("system_design", missing_system.stderr)
+
+            write_system_design_doc(project_dir)
+            run_sfk(project_dir, "artifact", "draft", "system_design", SYS_DOC)
+            run_sfk(project_dir, "artifact", "confirm", "system_design", env=git_env)
+            phase = run_sfk(project_dir, "phase", "check", "development")
+            payload = json.loads(phase.stdout)
+            self.assertFalse(payload["blocked"])
+            self.assertEqual(payload["hardMissing"], [])
+            self.assertEqual(payload["softMissing"][0]["phase"], "ui_design")
+
+            success = run_sfk(project_dir, "artifact", "draft", "development", DEV_DOC)
+            self.assertIn("qualityCheck：passed", success.stdout)
+
+    def test_development_artifact_reuses_generic_draft_confirm_flow(self) -> None:
+        git_env = {
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "user.name",
+            "GIT_CONFIG_VALUE_0": "Test Owner",
+        }
+        with self.make_project() as tmp:
+            project_dir = Path(tmp)
+            self.init_project(project_dir)
+            self.create_module(project_dir)
+            write_requirement_doc(project_dir)
+            run_sfk(project_dir, "artifact", "draft", "requirement", REQ_DOC)
+            run_sfk(project_dir, "artifact", "confirm", "requirement", env=git_env)
+            write_system_design_doc(project_dir)
+            run_sfk(project_dir, "artifact", "draft", "system_design", SYS_DOC)
+            run_sfk(project_dir, "artifact", "confirm", "system_design", env=git_env)
+            doc_path = write_development_doc(project_dir)
+
+            draft = run_sfk(project_dir, "artifact", "draft", "development", DEV_DOC)
+            self.assertIn("qualityCheck：passed", draft.stdout)
+            state = self.module_state(project_dir)
+            artifact = state["artifacts"]["development"]
+            self.assertEqual(artifact["status"], "in_progress")
+            self.assertEqual(artifact["quality"], "draft")
+            self.assertEqual(artifact["files"][-1], DEV_DOC)
+            self.assertNotIn("\\", artifact["files"][-1])
+            self.assertFalse(Path(artifact["files"][-1]).is_absolute())
+
+            text = doc_path.read_text(encoding="utf-8")
+            self.assertIn("## 1. 文档信息", text)
+            self.assertIn("| 质量状态 | draft |", text)
+
+            confirmed = run_sfk(project_dir, "artifact", "confirm", "development", env=git_env)
+            self.assertIn("qualityCheck：passed", confirmed.stdout)
+            state = self.module_state(project_dir)
+            artifact = state["artifacts"]["development"]
+            self.assertEqual(artifact["status"], "done")
+            self.assertEqual(artifact["quality"], "confirmed")
+            self.assertEqual(artifact["owner"], "Test Owner")
+            self.assertEqual(artifact["implementationApproval"]["status"], "pending")
+
+            current = run_sfk(project_dir, "implementation", "current", "development")
+            current_payload = json.loads(current.stdout)
+            self.assertFalse(current_payload["canImplement"])
+            self.assertEqual(current_payload["reason"], "implementation_approval_pending")
+
+            text = doc_path.read_text(encoding="utf-8")
+            self.assertIn("| 质量状态 | confirmed |", text)
+            self.assertIn("| 2026-06-10 | 创建开发草稿 | Test Owner |", text)
+
+    def test_implementation_approval_requires_confirmed_development_doc_and_is_auditable(self) -> None:
+        git_env = {
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "user.name",
+            "GIT_CONFIG_VALUE_0": "Test Owner",
+        }
+        with self.make_project() as tmp:
+            project_dir = Path(tmp)
+            self.init_project(project_dir)
+            self.create_module(project_dir)
+
+            current = run_sfk(project_dir, "implementation", "current", "development")
+            payload = json.loads(current.stdout)
+            self.assertFalse(payload["canImplement"])
+            self.assertEqual(payload["reason"], "development_document_missing")
+
+            empty_summary = run_sfk(project_dir, "implementation", "approve", "development", "--summary", "", check=False)
+            self.assertNotEqual(empty_summary.returncode, 0)
+            self.assertIn("授权摘要不能为空", empty_summary.stderr)
+
+            write_requirement_doc(project_dir)
+            run_sfk(project_dir, "artifact", "draft", "requirement", REQ_DOC)
+            run_sfk(project_dir, "artifact", "confirm", "requirement", env=git_env)
+            write_system_design_doc(project_dir)
+            run_sfk(project_dir, "artifact", "draft", "system_design", SYS_DOC)
+            run_sfk(project_dir, "artifact", "confirm", "system_design", env=git_env)
+            write_development_doc(project_dir)
+            run_sfk(project_dir, "artifact", "draft", "development", DEV_DOC)
+
+            draft_current = run_sfk(project_dir, "implementation", "current", "development")
+            draft_payload = json.loads(draft_current.stdout)
+            self.assertFalse(draft_payload["canImplement"])
+            self.assertEqual(draft_payload["reason"], "development_document_draft")
+            draft_approve = run_sfk(project_dir, "implementation", "approve", "development", "--summary", "实现登录接口", check=False)
+            self.assertNotEqual(draft_approve.returncode, 0)
+            self.assertIn("development_document_draft", draft_approve.stderr)
+
+            run_sfk(project_dir, "artifact", "confirm", "development", env=git_env)
+            approved = run_sfk(project_dir, "implementation", "approve", "development", "--summary", "按已确认开发文档实现登录接口", env=git_env)
+            self.assertIn("源码实现二次确认已记录", approved.stdout)
+
+            state = self.module_state(project_dir)
+            artifact = state["artifacts"]["development"]
+            approval = artifact["implementationApproval"]
+            self.assertEqual(approval["status"], "approved")
+            self.assertEqual(approval["approvedBy"], "Test Owner")
+            self.assertEqual(approval["approvedForFile"], DEV_DOC)
+            self.assertEqual(approval["approvedForConfirmedAt"], artifact["confirmedAt"])
+            self.assertEqual(approval["summary"], "按已确认开发文档实现登录接口")
+            self.assertTrue(approval["approvedAt"])
+            self.assertEqual(state["history"][-1]["action"], "approve_development_implementation")
+
+            current = run_sfk(project_dir, "implementation", "current", "development")
+            payload = json.loads(current.stdout)
+            self.assertTrue(payload["canImplement"])
+            self.assertEqual(payload["reason"], "approved")
+
+    def test_development_draft_resets_implementation_approval(self) -> None:
+        git_env = {
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "user.name",
+            "GIT_CONFIG_VALUE_0": "Test Owner",
+        }
+        with self.make_project() as tmp:
+            project_dir = Path(tmp)
+            self.init_project(project_dir)
+            self.create_module(project_dir)
+            write_requirement_doc(project_dir)
+            run_sfk(project_dir, "artifact", "draft", "requirement", REQ_DOC)
+            run_sfk(project_dir, "artifact", "confirm", "requirement", env=git_env)
+            write_system_design_doc(project_dir)
+            run_sfk(project_dir, "artifact", "draft", "system_design", SYS_DOC)
+            run_sfk(project_dir, "artifact", "confirm", "system_design", env=git_env)
+            write_development_doc(project_dir)
+            run_sfk(project_dir, "artifact", "draft", "development", DEV_DOC)
+            run_sfk(project_dir, "artifact", "confirm", "development", env=git_env)
+            run_sfk(project_dir, "implementation", "approve", "development", "--summary", "实现登录接口", env=git_env)
+            self.assertEqual(self.module_state(project_dir)["artifacts"]["development"]["implementationApproval"]["status"], "approved")
+
+            run_sfk(project_dir, "artifact", "draft", "development", DEV_DOC)
+            artifact = self.module_state(project_dir)["artifacts"]["development"]
+            self.assertEqual(artifact["implementationApproval"]["status"], "pending")
+            current = run_sfk(project_dir, "implementation", "current", "development")
+            payload = json.loads(current.stdout)
+            self.assertFalse(payload["canImplement"])
+            self.assertEqual(payload["reason"], "development_document_draft")
+
+    def test_development_artifact_requires_required_sections(self) -> None:
+        git_env = {
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "user.name",
+            "GIT_CONFIG_VALUE_0": "Test Owner",
+        }
+        with self.make_project() as tmp:
+            project_dir = Path(tmp)
+            self.init_project(project_dir)
+            self.create_module(project_dir)
+            write_requirement_doc(project_dir)
+            run_sfk(project_dir, "artifact", "draft", "requirement", REQ_DOC)
+            run_sfk(project_dir, "artifact", "confirm", "requirement", env=git_env)
+            write_system_design_doc(project_dir)
+            run_sfk(project_dir, "artifact", "draft", "system_design", SYS_DOC)
+            run_sfk(project_dir, "artifact", "confirm", "system_design", env=git_env)
+            doc_path = project_dir / DEV_DOC
+            doc_path.parent.mkdir(parents=True, exist_ok=True)
+            doc_path.write_text(
+                "# 用户管理开发文档\n\n"
+                "## 文档信息\n\n"
+                "| 质量状态 | pending |\n\n"
+                "## 开发目标与范围\n\n"
+                "只包含目标，缺少其他必备章节。\n",
+                encoding="utf-8",
+            )
+
+            result = run_sfk(project_dir, "artifact", "draft", "development", DEV_DOC, check=False)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("开发文档质量检查未通过", result.stderr)
+            self.assertIn("缺少必备章节", result.stderr)
+            self.assertIn("API 设计依据", result.stderr)
+            self.assertIn("数据库设计依据", result.stderr)
+
+    def test_development_placeholder_warnings_block_confirm(self) -> None:
+        git_env = {
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "user.name",
+            "GIT_CONFIG_VALUE_0": "Test Owner",
+        }
+        with self.make_project() as tmp:
+            project_dir = Path(tmp)
+            self.init_project(project_dir)
+            self.create_module(project_dir)
+            write_requirement_doc(project_dir)
+            run_sfk(project_dir, "artifact", "draft", "requirement", REQ_DOC)
+            run_sfk(project_dir, "artifact", "confirm", "requirement", env=git_env)
+            write_system_design_doc(project_dir)
+            run_sfk(project_dir, "artifact", "draft", "system_design", SYS_DOC)
+            run_sfk(project_dir, "artifact", "confirm", "system_design", env=git_env)
+            doc_path = write_development_doc(project_dir)
+            text = doc_path.read_text(encoding="utf-8")
+            doc_path.write_text(text.replace("实现用户登录开发计划，不直接声明代码已经完成。", "[说明本次开发要完成的目标。]"), encoding="utf-8")
+
+            draft = run_sfk(project_dir, "artifact", "draft", "development", DEV_DOC)
+            self.assertIn("qualityCheck：warnings", draft.stdout)
+            self.assertIn("模板占位符", draft.stdout)
+            confirm = run_sfk(project_dir, "artifact", "confirm", "development", check=False)
+            self.assertNotEqual(confirm.returncode, 0)
+            self.assertIn("模板占位符", confirm.stderr)
+            artifact = self.module_state(project_dir)["artifacts"]["development"]
+            self.assertEqual(artifact["status"], "in_progress")
+            self.assertEqual(artifact["quality"], "draft")
+
+            doc_path.write_text(doc_path.read_text(encoding="utf-8").replace("[说明本次开发要完成的目标。]", "实现用户登录开发计划，不直接声明代码已经完成。"), encoding="utf-8")
+            confirmed = run_sfk(project_dir, "artifact", "confirm", "development", env=git_env)
+            self.assertIn("qualityCheck：passed", confirmed.stdout)
+
     def test_status_suggests_system_design_and_reserved_development_next_steps(self) -> None:
         git_env = {
             "GIT_CONFIG_COUNT": "1",
@@ -699,7 +1018,23 @@ class SfkCliTests(unittest.TestCase):
 
             run_sfk(project_dir, "artifact", "confirm", "system_design", env=git_env)
             status = run_sfk(project_dir, "status")
-            self.assertIn("/sfk-dev（后续阶段预留，尚未完整实现）", status.stdout)
+            self.assertIn("/sfk-dev", status.stdout)
+            self.assertNotIn("/sfk-dev（后续阶段预留，尚未完整实现）", status.stdout)
+
+            write_development_doc(project_dir)
+            run_sfk(project_dir, "artifact", "draft", "development", DEV_DOC)
+            status = run_sfk(project_dir, "status")
+            self.assertIn("继续使用 /sfk-dev", status.stdout)
+
+            run_sfk(project_dir, "artifact", "confirm", "development", env=git_env)
+            status = run_sfk(project_dir, "status")
+            self.assertIn("源码实现二次确认", status.stdout)
+            self.assertIn("实现授权:pending", status.stdout)
+
+            run_sfk(project_dir, "implementation", "approve", "development", "--summary", "实现用户管理开发计划", env=git_env)
+            status = run_sfk(project_dir, "status")
+            self.assertIn("源码实现已获授权", status.stdout)
+            self.assertIn("实现授权:approved", status.stdout)
 
     def test_context_discover_identifies_new_project(self) -> None:
         with self.make_project() as tmp:
@@ -844,9 +1179,8 @@ class SfkCliTests(unittest.TestCase):
             write_system_design_doc(project_dir)
             run_sfk(project_dir, "artifact", "draft", "system_design", SYS_DOC)
             run_sfk(project_dir, "artifact", "confirm", "system_design", env=git_env)
-            dev_doc = f"docs/super-flow-kit/{MODULE_ID}/dev.md"
-            (project_dir / dev_doc).write_text("# Dev doc\n", encoding="utf-8")
-            run_sfk(project_dir, "artifact", "draft", "development", dev_doc)
+            write_development_doc(project_dir)
+            run_sfk(project_dir, "artifact", "draft", "development", DEV_DOC)
 
             result = run_sfk(project_dir, "artifact", "impact", "ui_design")
             payload = json.loads(result.stdout)
@@ -874,9 +1208,8 @@ class SfkCliTests(unittest.TestCase):
             write_system_design_doc(project_dir)
             run_sfk(project_dir, "artifact", "draft", "system_design", SYS_DOC)
             run_sfk(project_dir, "artifact", "confirm", "system_design", env=git_env)
-            dev_doc = f"docs/super-flow-kit/{MODULE_ID}/dev.md"
-            (project_dir / dev_doc).write_text("# Dev doc\n", encoding="utf-8")
-            run_sfk(project_dir, "artifact", "draft", "development", dev_doc)
+            write_development_doc(project_dir)
+            run_sfk(project_dir, "artifact", "draft", "development", DEV_DOC)
 
             result = run_sfk(project_dir, "artifact", "impact", "system_design")
             payload = json.loads(result.stdout)
@@ -884,13 +1217,46 @@ class SfkCliTests(unittest.TestCase):
             self.assertTrue(payload["shouldWarnBeforeChange"])
             self.assertTrue(development["needsReview"])
             self.assertIn("开发实现", development["reason"])
-            self.assertIn("接口/数据模型", development["reason"])
+            self.assertIn("API / 接口设计", development["reason"])
+            self.assertIn("数据库设计", development["reason"])
+
+    def test_artifact_impact_reports_development_downstream_review(self) -> None:
+        git_env = {
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "user.name",
+            "GIT_CONFIG_VALUE_0": "Test Owner",
+        }
+        with self.make_project() as tmp:
+            project_dir = Path(tmp)
+            self.init_project(project_dir)
+            self.create_module(project_dir)
+            write_requirement_doc(project_dir)
+            run_sfk(project_dir, "artifact", "draft", "requirement", REQ_DOC)
+            run_sfk(project_dir, "artifact", "confirm", "requirement", env=git_env)
+            write_system_design_doc(project_dir)
+            run_sfk(project_dir, "artifact", "draft", "system_design", SYS_DOC)
+            run_sfk(project_dir, "artifact", "confirm", "system_design", env=git_env)
+            write_development_doc(project_dir)
+            run_sfk(project_dir, "artifact", "draft", "development", DEV_DOC)
+            test_doc = f"docs/super-flow-kit/{MODULE_ID}/test.md"
+            (project_dir / test_doc).write_text("# Test doc\n", encoding="utf-8")
+            run_sfk(project_dir, "artifact", "draft", "testing", test_doc)
+
+            result = run_sfk(project_dir, "artifact", "impact", "development")
+            payload = json.loads(result.stdout)
+            testing = next(item for item in payload["downstream"] if item["phase"] == "testing")
+            self.assertTrue(payload["shouldWarnBeforeChange"])
+            self.assertTrue(testing["needsReview"])
+            self.assertIn("测试覆盖", testing["reason"])
+            self.assertIn("部署配置", testing["reason"])
+            self.assertIn("回滚", testing["reason"])
 
     def test_command_docs_do_not_use_fixed_custom_options(self) -> None:
         command_paths = [
             REPO_ROOT / ".claude" / "commands" / "sfk-req.md",
             REPO_ROOT / ".claude" / "commands" / "sfk-ui.md",
             REPO_ROOT / ".claude" / "commands" / "sfk-design.md",
+            REPO_ROOT / ".claude" / "commands" / "sfk-dev.md",
         ]
         forbidden_line_patterns = [
             re.compile(r"^\s*-\s*(自定义|其他)(\s|$)"),
@@ -901,6 +1267,10 @@ class SfkCliTests(unittest.TestCase):
             for line in path.read_text(encoding="utf-8").splitlines():
                 for pattern in forbidden_line_patterns:
                     self.assertIsNone(pattern.search(line), f"{path}: {line}")
+        dev_doc = (REPO_ROOT / ".claude" / "commands" / "sfk-dev.md").read_text(encoding="utf-8")
+        self.assertIn("implementation approve development", dev_doc)
+        self.assertIn("Gate C", dev_doc)
+        self.assertIn("Gate B 只确认开发文档", dev_doc)
 
 
 if __name__ == "__main__":
