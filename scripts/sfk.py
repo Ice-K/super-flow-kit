@@ -8,11 +8,14 @@ without jq/npm dependencies in Claude Code environments.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
+import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -1341,6 +1344,359 @@ def enforce_code_review_readiness(state: dict[str, Any]) -> None:
         + "。请先执行：python scripts/sfk.py implementation current development；"
         + "必要时执行：python scripts/sfk.py implementation approve development --summary \"<本次实现范围摘要>\"。"
     )
+
+
+def exports_dir() -> Path:
+    return root() / "docs" / "super-flow-kit" / "exports"
+
+
+def export_timestamp() -> str:
+    return datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+
+
+def safe_export_slug(value: str) -> str:
+    candidate = re.sub(r"[^A-Za-z0-9._-]+", "-", value.strip()).strip("-._").lower()
+    return candidate or "project"
+
+
+def unique_path(path: Path) -> Path:
+    if not path.exists():
+        return path
+    if path.suffix:
+        stem = path.with_suffix("")
+        suffix = path.suffix
+        for index in range(2, 1000):
+            candidate = stem.parent / f"{stem.name}-{index}{suffix}"
+            if not candidate.exists():
+                return candidate
+    else:
+        for index in range(2, 1000):
+            candidate = path.parent / f"{path.name}-{index}"
+            if not candidate.exists():
+                return candidate
+    raise SfkError(f"无法生成不冲突的导出路径：{rel(path)}")
+
+
+def package_rel(path: Path, base: Path) -> str:
+    return path.relative_to(base).as_posix()
+
+
+def module_state_for_export(index: dict[str, Any], module_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    validate_module_id(module_id)
+    modules = index.get("modules", {})
+    if module_id not in modules:
+        raise SfkError(f"模块不存在，无法导出：{module_id}")
+    return modules[module_id], read_json(state_path(module_id))
+
+
+def is_exportable_artifact_path(module_id: str, file_path: str) -> tuple[bool, str | None]:
+    if not file_path:
+        return False, "empty_path"
+    raw = str(file_path).replace("\\", "/")
+    if Path(raw).is_absolute():
+        return False, "absolute_path"
+    if ".." in Path(raw).parts:
+        return False, "parent_reference"
+    if not raw.startswith(f"docs/super-flow-kit/{module_id}/"):
+        return False, "outside_module_docs"
+    if raw.startswith("docs/super-flow-kit/exports/"):
+        return False, "inside_exports"
+    if Path(raw).suffix.lower() != ".md":
+        return False, "not_markdown"
+    lower_name = Path(raw).name.lower()
+    if any(marker in lower_name for marker in (".env", "secret", "credential", "private-key", "id_rsa")):
+        return False, "sensitive_filename"
+    resolved = (root() / raw).resolve(strict=False)
+    try:
+        resolved.relative_to(root().resolve())
+    except ValueError:
+        return False, "outside_project_root"
+    return True, None
+
+
+def detect_secret_markers(path: Path) -> list[str]:
+    text = path.read_text(encoding="utf-8", errors="ignore")
+    markers: list[str] = []
+    if re.search(r"-----BEGIN [A-Z ]*PRIVATE KEY-----", text):
+        markers.append("private_key_block")
+    if re.search(r"\bAKIA[0-9A-Z]{16}\b", text):
+        markers.append("aws_access_key_id")
+    secret_re = re.compile(r"(?im)^\s*(?:api[_-]?key|password|token|secret)\s*[:=]\s*['\"]?([^'\"\s#]+)")
+    for match in secret_re.finditer(text):
+        value = match.group(1).strip()
+        if value and not re.fullmatch(r"(?:xxx+|\*+|<[^>]+>|\[[^\]]+\]|待确认|placeholder|example|demo)", value, flags=re.I):
+            markers.append("inline_secret")
+            break
+    return markers
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def phase_export_filename(phase_id: str, source_path: str) -> str:
+    suffix = Path(source_path).suffix or ".md"
+    name = PHASE_NAMES[phase_id].replace(" ", "").replace("/", "")
+    return f"{name}{suffix}"
+
+
+def add_export_risk(model: dict[str, Any], phase: str | None, severity: str, message: str, action: str) -> None:
+    risk = {"phase": phase, "severity": severity, "message": message, "action": action}
+    model.setdefault("risks", []).append(risk)
+    model.setdefault("checklist", []).append({"done": False, "item": action, "source": phase or "module"})
+
+
+def module_export_model(index: dict[str, Any], module_id: str) -> dict[str, Any]:
+    module_info, state = module_state_for_export(index, module_id)
+    module = state.get("module", {})
+    model: dict[str, Any] = {
+        "moduleId": module_id,
+        "displayName": module.get("displayName") or module_info.get("displayName") or module_id,
+        "currentPhase": state.get("currentPhase", "requirement"),
+        "statePath": rel(state_path(module_id)),
+        "artifacts": [],
+        "risks": [],
+        "checklist": [],
+        "implementation": implementation_approval_status(state),
+    }
+    artifacts = state.get("artifacts", {})
+    for phase_id, phase_name in PHASES:
+        artifact = artifacts.get(phase_id, {})
+        summary = artifact_summary(artifact)
+        current_file = summary["currentFile"]
+        entry: dict[str, Any] = {
+            "phase": phase_id,
+            "phaseName": phase_name,
+            "status": summary["status"],
+            "quality": summary["quality"],
+            "sourcePath": current_file,
+            "packagePath": None,
+            "copied": False,
+            "sha256": None,
+            "bytes": None,
+            "riskReason": None,
+        }
+        if not current_file:
+            entry["riskReason"] = "missing_artifact"
+            add_export_risk(model, phase_id, "medium", f"{phase_name} 缺少当前产出物。", f"补齐或确认 {PHASE_COMMANDS[phase_id]} 产出物")
+        elif summary["missingFiles"]:
+            entry["riskReason"] = "file_missing"
+            add_export_risk(model, phase_id, "high", f"{phase_name} 当前产出物文件缺失：{current_file}", "修复产出物文件引用或重新生成文档")
+        elif summary["emptyFiles"]:
+            entry["riskReason"] = "file_empty"
+            add_export_risk(model, phase_id, "high", f"{phase_name} 当前产出物文件为空：{current_file}", "补充产出物内容后重新导出")
+        elif summary["status"] != "done" or summary["quality"] != "confirmed":
+            entry["riskReason"] = "not_confirmed"
+            add_export_risk(model, phase_id, "medium", f"{phase_name} 尚未 confirmed：{summary['status']} / {summary['quality']}", f"继续使用 {PHASE_COMMANDS[phase_id]} 完成确认")
+        ok, reason = is_exportable_artifact_path(module_id, current_file or "")
+        if current_file and not ok:
+            entry["riskReason"] = reason
+            add_export_risk(model, phase_id, "high", f"{phase_name} 产出物不在允许导出目录，已跳过：{current_file}", "将产出物保存到模块 docs/super-flow-kit 目录后重新导出")
+        model["artifacts"].append(entry)
+    implementation = model["implementation"]
+    if not implementation.get("canImplement"):
+        add_export_risk(model, "development", "medium", f"源码实现授权未满足：{implementation.get('reason')}", "如需证明实现已获准，请回到 /sfk-dev 完成源码实现二次确认")
+    return model
+
+
+def project_export_model(index: dict[str, Any]) -> dict[str, Any]:
+    modules = index.get("modules", {})
+    if not modules:
+        raise SfkError("当前项目没有可导出的模块。")
+    module_models: list[dict[str, Any]] = []
+    project_risks: list[dict[str, Any]] = []
+    for module_id in modules:
+        try:
+            module_models.append(module_export_model(index, module_id))
+        except SfkError as exc:
+            project_risks.append({"moduleId": module_id, "phase": None, "severity": "high", "message": str(exc), "action": "修复模块状态文件后重新导出"})
+    deployment_readiness = deployment_readiness_report(index)
+    if not deployment_readiness.get("allModulesTestingConfirmed"):
+        project_risks.append({"moduleId": None, "phase": "deployment", "severity": "medium", "message": deployment_readiness.get("message"), "action": "补齐各模块测试产出物后再进行正式部署交付"})
+    return {"modules": module_models, "risks": project_risks, "deploymentReadiness": deployment_readiness}
+
+
+def copy_module_artifacts(module_model: dict[str, Any], artifacts_dir: Path, package_prefix: str = "artifacts") -> None:
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+    for entry in module_model.get("artifacts", []):
+        source_path = entry.get("sourcePath")
+        if not source_path or entry.get("riskReason") in {"file_missing", "file_empty"}:
+            continue
+        ok, reason = is_exportable_artifact_path(module_model["moduleId"], source_path)
+        if not ok:
+            entry["riskReason"] = reason
+            continue
+        source = root() / source_path
+        markers = detect_secret_markers(source)
+        if markers:
+            raise SfkError(f"检测到疑似敏感信息，已阻止导出：{source_path} ({', '.join(markers)})。请先脱敏后再导出。")
+        destination = unique_path(artifacts_dir / phase_export_filename(entry["phase"], source_path))
+        shutil.copy2(source, destination)
+        entry["copied"] = True
+        entry["bytes"] = destination.stat().st_size
+        entry["sha256"] = sha256_file(destination)
+        entry["packagePath"] = f"{package_prefix}/{destination.name}"
+
+
+def markdown_table(headers: list[str], rows: list[list[Any]]) -> str:
+    lines = ["| " + " | ".join(headers) + " |", "| " + " | ".join("---" for _ in headers) + " |"]
+    for row in rows:
+        lines.append("| " + " | ".join(str(cell) if cell is not None else "" for cell in row) + " |")
+    return "\n".join(lines)
+
+
+def render_module_export_readme(model: dict[str, Any]) -> str:
+    rows = [[item["phaseName"], item["status"], item["quality"], item.get("sourcePath") or "", "是" if item.get("copied") else "否", item.get("riskReason") or ""] for item in model["artifacts"]]
+    return (
+        f"# 模块交付包：{model['displayName']}\n\n"
+        f"- 模块 ID：{model['moduleId']}\n"
+        f"- 当前阶段：{model['currentPhase']}\n"
+        f"- 风险数量：{len(model.get('risks', []))}\n\n"
+        "## 阶段状态总览\n\n"
+        + markdown_table(["阶段", "状态", "质量", "源文件", "已复制", "风险"], rows)
+        + "\n\n## 文件\n\n- `manifest.json`：机器可读导出清单。\n- `summary.md`：交付摘要。\n- `indices/artifacts.md`：产出物索引。\n- `risks/risk-register.md`：风险与待办。\n"
+    )
+
+
+def render_project_export_readme(model: dict[str, Any]) -> str:
+    rows = [[item["moduleId"], item["displayName"], item["currentPhase"], len(item.get("risks", [])), f"modules/{item['moduleId']}/README.md"] for item in model["modules"]]
+    return "# 项目交付包\n\n" + markdown_table(["模块 ID", "模块", "当前阶段", "风险数", "模块包"], rows) + "\n"
+
+
+def render_export_summary(model: dict[str, Any], package_type: str) -> str:
+    modules = model["modules"] if package_type == "project" else [model]
+    completed = sum(1 for item in modules if not item.get("risks"))
+    return (
+        f"# 交付摘要\n\n"
+        f"- 导出类型：{package_type}\n"
+        f"- 模块数量：{len(modules)}\n"
+        f"- 无风险模块数：{completed}\n"
+        f"- 风险总数：{sum(len(item.get('risks', [])) for item in modules) + len(model.get('risks', [])) if package_type == 'project' else len(model.get('risks', []))}\n"
+    )
+
+
+def render_export_artifacts_index(modules: list[dict[str, Any]]) -> str:
+    lines = ["# 产出物索引\n"]
+    for module in modules:
+        lines.append(f"## {module['displayName']}（{module['moduleId']}）\n")
+        rows = [[item["phaseName"], item.get("sourcePath") or "", item.get("packagePath") or "", "是" if item.get("copied") else "否", item.get("riskReason") or ""] for item in module["artifacts"]]
+        lines.append(markdown_table(["阶段", "源文件", "包内路径", "已复制", "风险"], rows))
+        lines.append("")
+    return "\n".join(lines)
+
+
+def render_export_modules_index(modules: list[dict[str, Any]]) -> str:
+    rows = [[item["moduleId"], item["displayName"], item["currentPhase"], len(item.get("risks", [])), f"modules/{item['moduleId']}/"] for item in modules]
+    return "# 模块索引\n\n" + markdown_table(["模块 ID", "模块", "当前阶段", "风险数", "包内目录"], rows) + "\n"
+
+
+def render_export_risk_register(modules: list[dict[str, Any]], project_risks: list[dict[str, Any]] | None = None) -> str:
+    rows: list[list[Any]] = []
+    for module in modules:
+        for risk in module.get("risks", []):
+            rows.append([module["moduleId"], risk.get("phase") or "", risk.get("severity"), risk.get("message"), risk.get("action")])
+    for risk in project_risks or []:
+        rows.append([risk.get("moduleId") or "项目", risk.get("phase") or "", risk.get("severity"), risk.get("message"), risk.get("action")])
+    if not rows:
+        rows.append(["-", "-", "-", "暂无导出风险", "-"])
+    return "# 风险与待办汇总\n\n" + markdown_table(["模块", "阶段", "严重级别", "风险/待办", "建议动作"], rows) + "\n"
+
+
+def render_export_checklist(modules: list[dict[str, Any]], project_risks: list[dict[str, Any]] | None = None) -> str:
+    lines = ["# 交付检查清单\n"]
+    for module in modules:
+        if not module.get("checklist"):
+            lines.append(f"- [x] {module['displayName']}：暂无导出发现的待办")
+        for item in module.get("checklist", []):
+            lines.append(f"- [ ] {module['displayName']}：{item.get('item')}")
+    for risk in project_risks or []:
+        lines.append(f"- [ ] 项目：{risk.get('action')}")
+    return "\n".join(lines) + "\n"
+
+
+def zip_export_dir(export_dir: Path) -> Path:
+    zip_path = unique_path(export_dir.with_suffix(".zip"))
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for current_dir, _, file_names in os.walk(export_dir):
+            for file_name in file_names:
+                path = Path(current_dir) / file_name
+                archive.write(path, path.relative_to(export_dir.parent).as_posix())
+    return zip_path
+
+
+def base_manifest(index: dict[str, Any], package_type: str, output_dir: Path, generated_at: str) -> dict[str, Any]:
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "exportVersion": "0.8",
+        "packageType": package_type,
+        "generatedAt": generated_at,
+        "project": {"name": index.get("project", {}).get("name", root().name), "root": "."},
+        "package": {"path": rel(output_dir), "zipPath": None},
+        "modules": [],
+    }
+
+
+def write_json_file(path: Path, data: dict[str, Any]) -> None:
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def write_module_export_package(index: dict[str, Any], module_id: str, with_zip: bool) -> dict[str, Any]:
+    generated_at = now_iso()
+    model = module_export_model(index, module_id)
+    output_dir = unique_path(exports_dir() / f"{export_timestamp()}-module-{module_id}")
+    output_dir.mkdir(parents=True, exist_ok=False)
+    copy_module_artifacts(model, output_dir / "artifacts", "artifacts")
+    (output_dir / "risks").mkdir(parents=True, exist_ok=True)
+    (output_dir / "indices").mkdir(parents=True, exist_ok=True)
+    (output_dir / "README.md").write_text(render_module_export_readme(model), encoding="utf-8")
+    (output_dir / "summary.md").write_text(render_export_summary(model, "module"), encoding="utf-8")
+    (output_dir / "indices" / "artifacts.md").write_text(render_export_artifacts_index([model]), encoding="utf-8")
+    (output_dir / "risks" / "risk-register.md").write_text(render_export_risk_register([model]), encoding="utf-8")
+    (output_dir / "checklist.md").write_text(render_export_checklist([model]), encoding="utf-8")
+    manifest = base_manifest(index, "module", output_dir, generated_at)
+    manifest["modules"] = [model]
+    write_json_file(output_dir / "manifest.json", manifest)
+    zip_path = zip_export_dir(output_dir) if with_zip else None
+    if zip_path:
+        manifest["package"]["zipPath"] = rel(zip_path)
+        write_json_file(output_dir / "manifest.json", manifest)
+    return {"outputDir": rel(output_dir), "zipPath": rel(zip_path) if zip_path else None, "manifest": rel(output_dir / "manifest.json"), "riskCount": len(model.get("risks", []))}
+
+
+def write_project_export_package(index: dict[str, Any], with_zip: bool) -> dict[str, Any]:
+    generated_at = now_iso()
+    model = project_export_model(index)
+    project_slug = safe_export_slug(index.get("project", {}).get("name") or root().name)
+    output_dir = unique_path(exports_dir() / f"{export_timestamp()}-project-{project_slug}")
+    output_dir.mkdir(parents=True, exist_ok=False)
+    for module in model["modules"]:
+        module_dir = output_dir / "modules" / module["moduleId"]
+        module_dir.mkdir(parents=True, exist_ok=True)
+        copy_module_artifacts(module, module_dir / "artifacts", f"modules/{module['moduleId']}/artifacts")
+        (module_dir / "README.md").write_text(render_module_export_readme(module), encoding="utf-8")
+    (output_dir / "risks").mkdir(parents=True, exist_ok=True)
+    (output_dir / "indices").mkdir(parents=True, exist_ok=True)
+    (output_dir / "README.md").write_text(render_project_export_readme(model), encoding="utf-8")
+    (output_dir / "summary.md").write_text(render_export_summary(model, "project"), encoding="utf-8")
+    (output_dir / "indices" / "modules.md").write_text(render_export_modules_index(model["modules"]), encoding="utf-8")
+    (output_dir / "indices" / "artifacts.md").write_text(render_export_artifacts_index(model["modules"]), encoding="utf-8")
+    (output_dir / "risks" / "risk-register.md").write_text(render_export_risk_register(model["modules"], model.get("risks", [])), encoding="utf-8")
+    (output_dir / "checklist.md").write_text(render_export_checklist(model["modules"], model.get("risks", [])), encoding="utf-8")
+    manifest = base_manifest(index, "project", output_dir, generated_at)
+    manifest["modules"] = model["modules"]
+    manifest["projectRisks"] = model.get("risks", [])
+    manifest["deploymentReadiness"] = model.get("deploymentReadiness")
+    write_json_file(output_dir / "manifest.json", manifest)
+    zip_path = zip_export_dir(output_dir) if with_zip else None
+    if zip_path:
+        manifest["package"]["zipPath"] = rel(zip_path)
+        write_json_file(output_dir / "manifest.json", manifest)
+    return {"outputDir": rel(output_dir), "zipPath": rel(zip_path) if zip_path else None, "manifest": rel(output_dir / "manifest.json"), "riskCount": sum(len(module.get("risks", [])) for module in model["modules"]) + len(model.get("risks", []))}
+
 def downstream_phases(phase: str) -> list[str]:
     validate_phase(phase)
     phase_ids = [phase_id for phase_id, _ in PHASES]
@@ -1937,6 +2293,34 @@ def implementation_approve(args: argparse.Namespace) -> None:
     print(f"approvedForFile：{current_file}")
 
 
+def export_module(args: argparse.Namespace) -> None:
+    index = require_index()
+    module_id = args.module_id
+    if not module_id:
+        _, _, module_id = require_current_state(index)
+    result = write_module_export_package(index, module_id, args.zip)
+    print("✅ 模块交付包已导出。")
+    print(f"exportType：module")
+    print(f"moduleId：{module_id}")
+    print(f"outputDir：{result['outputDir']}")
+    print(f"manifest：{result['manifest']}")
+    if result.get("zipPath"):
+        print(f"zipPath：{result['zipPath']}")
+    print(f"riskCount：{result['riskCount']}")
+
+
+def export_project(args: argparse.Namespace) -> None:
+    index = require_index()
+    result = write_project_export_package(index, args.zip)
+    print("✅ 项目交付包已导出。")
+    print("exportType：project")
+    print(f"outputDir：{result['outputDir']}")
+    print(f"manifest：{result['manifest']}")
+    if result.get("zipPath"):
+        print(f"zipPath：{result['zipPath']}")
+    print(f"riskCount：{result['riskCount']}")
+
+
 def tui_select(args: argparse.Namespace) -> None:
     import sfk_tui
 
@@ -2017,6 +2401,16 @@ def build_parser() -> argparse.ArgumentParser:
     code_review_sub = p_code_review.add_subparsers(dest="code_review_command", required=True)
     p_code_review_readiness = code_review_sub.add_parser("readiness")
     p_code_review_readiness.set_defaults(func=code_review_readiness)
+
+    p_export = sub.add_parser("export")
+    export_sub = p_export.add_subparsers(dest="export_command", required=True)
+    p_export_module = export_sub.add_parser("module")
+    p_export_module.add_argument("module_id", nargs="?")
+    p_export_module.add_argument("--zip", action="store_true")
+    p_export_module.set_defaults(func=export_module)
+    p_export_project = export_sub.add_parser("project")
+    p_export_project.add_argument("--zip", action="store_true")
+    p_export_project.set_defaults(func=export_project)
 
     p_impl = sub.add_parser("implementation")
     impl_sub = p_impl.add_subparsers(dest="implementation_command", required=True)

@@ -2,7 +2,7 @@
 
 `super-flow-kit` 是一个面向 Claude Code 的结构化软件交付工作流插件，目标是帮助用户从需求分析到部署上线，按阶段沉淀项目上下文、产出物和工作流状态。
 
-当前版本从 **v0.1 MVP** 继续演进，已覆盖需求分析、UI 设计、系统设计、开发计划、代码审查、功能测试和部署上线闭环：
+当前版本从 **v0.1 MVP** 继续演进，已覆盖需求分析、UI 设计、系统设计、开发计划、代码审查、功能测试、部署上线和交付包导出能力：
 
 ```text
 初始化项目 → 创建模块 → 需求分析 → UI 设计 → 系统设计 → 开发计划 → 代码审查 → 功能测试 → 部署上线 → 保存产出物 → 查看状态看板
@@ -65,9 +65,15 @@ v0.7 代码审查阶段已实现：
 - 代码审查文档记录 `pass`、`pass_with_risks`、`changes_required`、`blocked` 四类审查结果，以及 `Open`、`Fixed`、`Verified`、`Deferred`、`Accepted`、`Rejected` 六类问题状态。
 - 代码审查不直接修改业务源码；发现需修复问题时回流 `/sfk-dev`，重新通过源码实现二次确认后再复审。
 
+v0.8 交付包导出能力已实现：
+
+- `/sfk-export` — 导出 super-flow-kit 交付包，支持单模块交付包和全项目合并交付包。
+- `python scripts/sfk.py export module [moduleId] [--zip]` — 导出当前模块或指定模块的交付包，可选生成 zip。
+- `python scripts/sfk.py export project [--zip]` — 汇总所有模块为项目级交付包，可选生成 zip。
+- 导出写入 `docs/super-flow-kit/exports/`，不修改 `.sfk` 状态，不导出业务源码、配置或密钥。
+
 暂未完整实现：
 
-- `/sfk-export`
 - `/sfk-reset`
 - 自然语言 hook 动态唤醒
 - 多人冲突自动合并
@@ -100,6 +106,8 @@ v0.1 完整实现 **需求分析** 阶段；v0.2 以 `/sfk-ui` 形式实现 **UI
 /sfk-code-review 审查用户管理实现
 /sfk-test 制定用户管理测试计划
 /sfk-deploy 制定用户管理部署计划
+/sfk-export module user-management --zip
+/sfk-export project --zip
 ```
 
 在 slash command 交互中，`/sfk-module create 用户管理` 会先由 Claude 根据语义推荐合法的 `moduleId`（如 `user-management`），再调用底层脚本；如无法可靠推荐，可使用 `--id` 显式指定。
@@ -136,7 +144,8 @@ v0.1 完整实现 **需求分析** 阶段；v0.2 以 `/sfk-ui` 形式实现 **UI
     ├── sfk-dev.md
     ├── sfk-code-review.md
     ├── sfk-test.md
-    └── sfk-deploy.md
+    ├── sfk-deploy.md
+    └── sfk-export.md
 
 scripts/
 ├── sfk.py
@@ -243,6 +252,10 @@ python scripts/sfk.py artifact current deployment
 python scripts/sfk.py implementation current development
 python scripts/sfk.py implementation approve development --summary "按已确认开发文档开始实现"
 python scripts/sfk.py code-review readiness
+python scripts/sfk.py export module
+python scripts/sfk.py export module user-management --zip
+python scripts/sfk.py export project
+python scripts/sfk.py export project --zip
 python scripts/sfk.py tui select --title "选择方案" --mode single --option mvp="MVP 方案" --option full="完整方案"
 python scripts/sfk.py status
 ```
@@ -283,6 +296,7 @@ rm -rf .sfk docs/super-flow-kit
 - `/sfk-test` 只确认测试文档，不代表所有测试已执行通过，也不代表部署已获准。
 - `/sfk-deploy` 草稿必须包含部署文档必备章节；确认时不得残留模板占位符。测试在部署阶段作为软依赖，但必须通过 `scripts/sfk.py deployment readiness` 检查所有模块是否有已确认且可用的测试产出物，并向用户提示风险。
 - `/sfk-deploy` 只确认部署文档，不代表真实部署已经执行，也不代表生产环境已经变更。
+- `/sfk-export` 是横向导出工具，不新增阶段状态，不写入 `.sfk` 状态；导出包只包含工作流交付文档、索引、风险清单、检查清单和 manifest，不包含业务源码或密钥。
 - `/sfk-req` 在写入草稿前会展示所有问题与用户选择，并提供确认、修改、回退、重选和取消分支。
 - `scripts/sfk.py tui select` 是无状态的通用交互选择能力；slash command 仍保留文本/编号选择作为兜底。
 

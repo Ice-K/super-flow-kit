@@ -150,14 +150,14 @@ python scripts/sfk.py status
 - v0.4.1 源码实现二次确认门禁：开发文档 confirmed 后仍需通过 `scripts/sfk.py implementation approve development --summary ...` 记录实现授权；授权前不得修改业务源码，授权也不代表实现完成。
 - v0.5 `/sfk-test` 功能测试阶段闭环：基于已确认需求以及可选系统设计/开发文档生成测试文档，复用通用 `artifact draft/confirm/current` 状态机；脚本层强制需求硬依赖、测试文档必备章节和确认前模板占位符清理，软依赖缺失时必须记录假设和风险。
 - v0.6 `/sfk-deploy` 部署上线阶段闭环：生成部署文档/上线计划，复用通用 `artifact draft/confirm/current` 状态机；部署阶段将 testing 作为软依赖，但新增只读 `scripts/sfk.py deployment readiness` 检查所有模块是否存在已确认且可用的测试产出物，并在命令流程中提示用户风险。
+- v0.7 `/sfk-code-review` 代码审查阶段闭环：在开发文档 confirmed 且源码实现授权 approved 后生成代码审查文档，记录审查结论、问题状态、修复回流和再审要求。
+- v0.8 `/sfk-export` 交付包导出能力：支持单模块交付包和全项目合并交付包，可选 zip；导出写入 `docs/super-flow-kit/exports/`，不修改 `.sfk` 状态，不导出业务源码或密钥。
 - REQ 阶段补齐脚本层质量门禁：`artifact draft/confirm requirement` 会检查必备章节和模板占位符，输出 `qualityCheck`，确认前不得残留模板占位符。
 
 ## 不在本轮实现
 
 - 自动修改业务代码并验证真实实现完成的 `/sfk-dev` 增强流程。
-- `/sfk-export`。
 - `/sfk-reset`。
-- `/sfk-code-review`。
 - hook 自然语言唤醒完整动态匹配。
 - 多人冲突自动合并。
 - 远程 push。

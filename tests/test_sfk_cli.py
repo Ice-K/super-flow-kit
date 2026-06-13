@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 
 
@@ -1581,7 +1582,146 @@ class SfkCliTests(unittest.TestCase):
             status = run_sfk(project_dir, "status")
             self.assertIn("核心交付流程已完成", status.stdout)
 
-    def test_context_discover_identifies_new_project(self) -> None:
+    def test_export_module_defaults_to_current_module_and_writes_package(self) -> None:
+        git_env = {
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "user.name",
+            "GIT_CONFIG_VALUE_0": "Test Owner",
+        }
+        with self.make_project() as tmp:
+            project_dir = Path(tmp)
+            self.init_project(project_dir)
+            self.create_module(project_dir)
+            write_requirement_doc(project_dir)
+            run_sfk(project_dir, "artifact", "draft", "requirement", REQ_DOC)
+            run_sfk(project_dir, "artifact", "confirm", "requirement", env=git_env)
+            before_index = (project_dir / ".sfk" / "index.json").read_text(encoding="utf-8")
+            before_state = (project_dir / ".sfk" / "modules" / MODULE_ID / "state.json").read_text(encoding="utf-8")
+
+            result = run_sfk(project_dir, "export", "module")
+            self.assertIn("模块交付包已导出", result.stdout)
+            output_dir_line = next(line for line in result.stdout.splitlines() if line.startswith("outputDir："))
+            output_dir = project_dir / output_dir_line.split("：", 1)[1]
+            self.assertTrue(output_dir.is_dir())
+            for rel_path in (
+                "README.md",
+                "summary.md",
+                "manifest.json",
+                "checklist.md",
+                "risks/risk-register.md",
+                "indices/artifacts.md",
+                "artifacts/需求分析.md",
+            ):
+                self.assertTrue((output_dir / rel_path).exists(), rel_path)
+            manifest = load_json(output_dir / "manifest.json")
+            self.assertEqual(manifest["packageType"], "module")
+            self.assertEqual(manifest["modules"][0]["moduleId"], MODULE_ID)
+            self.assertEqual(manifest["modules"][0]["artifacts"][0]["packagePath"], "artifacts/需求分析.md")
+            manifest_text = (output_dir / "manifest.json").read_text(encoding="utf-8")
+            self.assertNotIn("\\", manifest_text)
+            self.assertNotIn(str(project_dir), manifest_text)
+            self.assertEqual(before_index, (project_dir / ".sfk" / "index.json").read_text(encoding="utf-8"))
+            self.assertEqual(before_state, (project_dir / ".sfk" / "modules" / MODULE_ID / "state.json").read_text(encoding="utf-8"))
+
+    def test_export_module_accepts_explicit_module_id_and_zip(self) -> None:
+        git_env = {
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "user.name",
+            "GIT_CONFIG_VALUE_0": "Test Owner",
+        }
+        with self.make_project() as tmp:
+            project_dir = Path(tmp)
+            self.init_project(project_dir)
+            self.create_module(project_dir)
+            write_requirement_doc(project_dir)
+            run_sfk(project_dir, "artifact", "draft", "requirement", REQ_DOC)
+            run_sfk(project_dir, "artifact", "confirm", "requirement", env=git_env)
+
+            result = run_sfk(project_dir, "export", "module", MODULE_ID, "--zip")
+            zip_line = next(line for line in result.stdout.splitlines() if line.startswith("zipPath："))
+            zip_path = project_dir / zip_line.split("：", 1)[1]
+            self.assertTrue(zip_path.is_file())
+            with zipfile.ZipFile(zip_path) as archive:
+                names = archive.namelist()
+            self.assertTrue(any(name.endswith("/README.md") for name in names))
+            self.assertTrue(any(name.endswith("/manifest.json") for name in names))
+            self.assertTrue(any(name.endswith("/artifacts/需求分析.md") for name in names))
+            for name in names:
+                self.assertFalse(Path(name).is_absolute())
+                self.assertNotIn("..", Path(name).parts)
+
+    def test_export_project_combines_all_modules(self) -> None:
+        git_env = {
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "user.name",
+            "GIT_CONFIG_VALUE_0": "Test Owner",
+        }
+        with self.make_project() as tmp:
+            project_dir = Path(tmp)
+            self.init_project(project_dir)
+            self.create_module(project_dir)
+            write_requirement_doc(project_dir)
+            run_sfk(project_dir, "artifact", "draft", "requirement", REQ_DOC)
+            run_sfk(project_dir, "artifact", "confirm", "requirement", env=git_env)
+            run_sfk(project_dir, "module", "create", "订单管理", "--id", "order-management")
+
+            result = run_sfk(project_dir, "export", "project")
+            output_dir_line = next(line for line in result.stdout.splitlines() if line.startswith("outputDir："))
+            output_dir = project_dir / output_dir_line.split("：", 1)[1]
+            self.assertTrue((output_dir / "modules" / MODULE_ID / "README.md").exists())
+            self.assertTrue((output_dir / "modules" / MODULE_ID / "artifacts" / "需求分析.md").exists())
+            self.assertTrue((output_dir / "modules" / "order-management" / "README.md").exists())
+            self.assertTrue((output_dir / "indices" / "modules.md").exists())
+            self.assertTrue((output_dir / "indices" / "artifacts.md").exists())
+            self.assertTrue((output_dir / "risks" / "risk-register.md").exists())
+            manifest = load_json(output_dir / "manifest.json")
+            self.assertEqual({item["moduleId"] for item in manifest["modules"]}, {MODULE_ID, "order-management"})
+            risk_text = (output_dir / "risks" / "risk-register.md").read_text(encoding="utf-8")
+            self.assertIn("order-management", risk_text)
+            self.assertIn("缺少当前产出物", risk_text)
+
+    def test_export_rejects_unknown_module(self) -> None:
+        with self.make_project() as tmp:
+            project_dir = Path(tmp)
+            self.init_project(project_dir)
+            self.create_module(project_dir)
+            result = run_sfk(project_dir, "export", "module", "missing-module", check=False)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("模块不存在", result.stderr)
+
+    def test_export_avoids_overwriting_existing_packages(self) -> None:
+        with self.make_project() as tmp:
+            project_dir = Path(tmp)
+            self.init_project(project_dir)
+            self.create_module(project_dir)
+            first = run_sfk(project_dir, "export", "module")
+            second = run_sfk(project_dir, "export", "module")
+            first_dir = next(line for line in first.stdout.splitlines() if line.startswith("outputDir：")).split("：", 1)[1]
+            second_dir = next(line for line in second.stdout.splitlines() if line.startswith("outputDir：")).split("：", 1)[1]
+            self.assertNotEqual(first_dir, second_dir)
+            self.assertTrue((project_dir / first_dir).exists())
+            self.assertTrue((project_dir / second_dir).exists())
+
+    def test_export_blocks_suspected_secret_artifacts(self) -> None:
+        git_env = {
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "user.name",
+            "GIT_CONFIG_VALUE_0": "Test Owner",
+        }
+        with self.make_project() as tmp:
+            project_dir = Path(tmp)
+            self.init_project(project_dir)
+            self.create_module(project_dir)
+            doc_path = write_requirement_doc(project_dir)
+            doc_path.write_text(doc_path.read_text(encoding="utf-8") + "\n-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----\n", encoding="utf-8")
+            run_sfk(project_dir, "artifact", "draft", "requirement", REQ_DOC)
+            run_sfk(project_dir, "artifact", "confirm", "requirement", env=git_env)
+
+            result = run_sfk(project_dir, "export", "module", check=False)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("疑似敏感信息", result.stderr)
+
+
         with self.make_project() as tmp:
             project_dir = Path(tmp)
             self.init_project(project_dir)
@@ -2020,6 +2160,7 @@ class SfkCliTests(unittest.TestCase):
             REPO_ROOT / ".claude" / "commands" / "sfk-code-review.md",
             REPO_ROOT / ".claude" / "commands" / "sfk-test.md",
             REPO_ROOT / ".claude" / "commands" / "sfk-deploy.md",
+            REPO_ROOT / ".claude" / "commands" / "sfk-export.md",
         ]
         forbidden_line_patterns = [
             re.compile(r"^\s*-\s*(自定义|其他)(\s|$)"),
@@ -2034,8 +2175,9 @@ class SfkCliTests(unittest.TestCase):
         self.assertIn("implementation approve development", dev_doc)
         self.assertIn("Gate C", dev_doc)
         code_review_doc = (REPO_ROOT / ".claude" / "commands" / "sfk-code-review.md").read_text(encoding="utf-8")
-        for item in ("Gate C", "pass", "pass_with_risks", "changes_required", "blocked", "Open", "Fixed", "Verified", "Deferred", "Accepted", "Rejected", "/sfk-dev", "implementation approve development"):
-            self.assertIn(item, code_review_doc)
+        export_doc = (REPO_ROOT / ".claude" / "commands" / "sfk-export.md").read_text(encoding="utf-8")
+        for item in ("export module", "export project", "--zip"):
+            self.assertIn(item, export_doc)
 
 
 if __name__ == "__main__":

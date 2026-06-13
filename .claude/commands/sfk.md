@@ -24,6 +24,8 @@ argument-hint: "[操作]"
    - `/sfk-code-review <审查目标/审查范围>`
    - `/sfk-test <测试目标/测试范围>`
    - `/sfk-deploy <部署目标/上线范围>`
+   - `/sfk-export module [moduleId] [--zip]`
+   - `/sfk-export project [--zip]`
 
 约束：
 
