@@ -410,6 +410,17 @@ class SfkCliTests(unittest.TestCase):
     def module_state(self, project_dir: Path) -> dict:
         return load_json(project_dir / ".sfk" / "modules" / MODULE_ID / "state.json")
 
+    def assert_workflow_state_reset(self, state: dict) -> None:
+        self.assertEqual(state["currentPhase"], "requirement")
+        for phase, artifact in state["artifacts"].items():
+            self.assertEqual(artifact["status"], "pending", phase)
+            self.assertIsNone(artifact["quality"], phase)
+            self.assertEqual(artifact["files"], [], phase)
+            self.assertIsNone(artifact["updatedAt"], phase)
+            self.assertIsNone(artifact["confirmedAt"], phase)
+            self.assertIsNone(artifact["owner"], phase)
+        self.assertEqual(state["artifacts"]["development"]["implementationApproval"]["status"], "pending")
+
     def test_mvp_state_lifecycle(self) -> None:
         with self.make_project() as tmp:
             project_dir = Path(tmp)
@@ -1085,6 +1096,162 @@ class SfkCliTests(unittest.TestCase):
             payload = json.loads(current.stdout)
             self.assertFalse(payload["canImplement"])
             self.assertEqual(payload["reason"], "development_document_draft")
+
+    def test_reset_impact_is_read_only_and_preserves_docs_by_default(self) -> None:
+        git_env = {
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "user.name",
+            "GIT_CONFIG_VALUE_0": "Test Owner",
+        }
+        with self.make_project() as tmp:
+            project_dir = Path(tmp)
+            self.init_project(project_dir)
+            self.create_module(project_dir)
+            doc_path = write_requirement_doc(project_dir)
+            run_sfk(project_dir, "artifact", "draft", "requirement", REQ_DOC)
+            run_sfk(project_dir, "artifact", "confirm", "requirement", env=git_env)
+            index_path = project_dir / ".sfk" / "index.json"
+            state_path = project_dir / ".sfk" / "modules" / MODULE_ID / "state.json"
+            before_index = index_path.read_text(encoding="utf-8")
+            before_state = state_path.read_text(encoding="utf-8")
+            before_doc = doc_path.read_text(encoding="utf-8")
+
+            result = run_sfk(project_dir, "reset", "impact")
+            payload = json.loads(result.stdout)
+
+            self.assertEqual(payload["operation"], "reset")
+            self.assertEqual(payload["mode"], "impact")
+            self.assertTrue(payload["highRisk"])
+            self.assertEqual(payload["scope"], "current-module")
+            self.assertEqual(payload["confirmationPhrase"], "确认重置")
+            self.assertTrue(payload["docsPreservedByDefault"])
+            self.assertEqual(payload["willDelete"], [])
+            self.assertIn(".sfk/index.json", payload["willModify"])
+            self.assertIn(f".sfk/modules/{MODULE_ID}/state.json", payload["willModify"])
+            self.assertIn("docs/super-flow-kit/", payload["willNotModify"])
+            self.assertEqual(payload["modules"][0]["referencedArtifactFilesPreserved"], [REQ_DOC])
+            self.assertIn(REQ_DOC, payload["modules"][0]["artifactsToReset"][0]["files"])
+            self.assertEqual(index_path.read_text(encoding="utf-8"), before_index)
+            self.assertEqual(state_path.read_text(encoding="utf-8"), before_state)
+            self.assertEqual(doc_path.read_text(encoding="utf-8"), before_doc)
+
+    def test_reset_apply_rejects_fuzzy_confirmation_and_keeps_state(self) -> None:
+        git_env = {
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "user.name",
+            "GIT_CONFIG_VALUE_0": "Test Owner",
+        }
+        with self.make_project() as tmp:
+            project_dir = Path(tmp)
+            self.init_project(project_dir)
+            self.create_module(project_dir)
+            doc_path = write_requirement_doc(project_dir)
+            run_sfk(project_dir, "artifact", "draft", "requirement", REQ_DOC)
+            run_sfk(project_dir, "artifact", "confirm", "requirement", env=git_env)
+            state_path = project_dir / ".sfk" / "modules" / MODULE_ID / "state.json"
+            before_state = state_path.read_text(encoding="utf-8")
+            before_doc = doc_path.read_text(encoding="utf-8")
+
+            for fuzzy in ("好", "确认", "确认重置。"):
+                result = run_sfk(project_dir, "reset", "apply", "--confirm", fuzzy, check=False)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("确认语不匹配", result.stderr)
+                self.assertEqual(state_path.read_text(encoding="utf-8"), before_state)
+                self.assertEqual(doc_path.read_text(encoding="utf-8"), before_doc)
+
+    def test_reset_current_module_resets_workflow_state_and_keeps_docs(self) -> None:
+        git_env = {
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "user.name",
+            "GIT_CONFIG_VALUE_0": "Test Owner",
+        }
+        with self.make_project() as tmp:
+            project_dir = Path(tmp)
+            self.init_project(project_dir)
+            self.create_module(project_dir)
+            req_path = write_requirement_doc(project_dir)
+            run_sfk(project_dir, "artifact", "draft", "requirement", REQ_DOC)
+            run_sfk(project_dir, "artifact", "confirm", "requirement", env=git_env)
+            sys_path = write_system_design_doc(project_dir)
+            run_sfk(project_dir, "artifact", "draft", "system_design", SYS_DOC)
+            run_sfk(project_dir, "artifact", "confirm", "system_design", env=git_env)
+            dev_path = write_development_doc(project_dir)
+            run_sfk(project_dir, "artifact", "draft", "development", DEV_DOC)
+            run_sfk(project_dir, "artifact", "confirm", "development", env=git_env)
+            run_sfk(project_dir, "implementation", "approve", "development", "--summary", "实现登录接口", env=git_env)
+            self.assertEqual(self.module_state(project_dir)["artifacts"]["development"]["implementationApproval"]["status"], "approved")
+
+            result = run_sfk(project_dir, "reset", "apply", "--confirm", "确认重置", env=git_env)
+
+            self.assertIn("状态已重置", result.stdout)
+            state = self.module_state(project_dir)
+            self.assert_workflow_state_reset(state)
+            index = load_json(project_dir / ".sfk" / "index.json")
+            self.assertEqual(index["currentModule"], MODULE_ID)
+            self.assertEqual(index["modules"][MODULE_ID]["currentPhase"], "requirement")
+            for path in (req_path, sys_path, dev_path):
+                self.assertTrue(path.exists())
+                self.assertGreater(path.stat().st_size, 0)
+            self.assertEqual(state["history"][-1]["action"], "reset_workflow_state")
+            self.assertIn("产出物文档保留", state["history"][-1]["detail"])
+            self.assertNotIn("\\", index["modules"][MODULE_ID]["statePath"])
+            self.assertFalse(Path(index["modules"][MODULE_ID]["statePath"]).is_absolute())
+
+    def test_reset_project_resets_all_modules_without_deleting_docs_or_registry(self) -> None:
+        git_env = {
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "user.name",
+            "GIT_CONFIG_VALUE_0": "Test Owner",
+        }
+        second_module_id = "order-management"
+        second_doc = f"docs/super-flow-kit/{second_module_id}/20260610120000-{second_module_id}-需求分析.md"
+        with self.make_project() as tmp:
+            project_dir = Path(tmp)
+            self.init_project(project_dir)
+            self.create_module(project_dir)
+            first_doc_path = write_requirement_doc(project_dir)
+            run_sfk(project_dir, "artifact", "draft", "requirement", REQ_DOC)
+            run_sfk(project_dir, "artifact", "confirm", "requirement", env=git_env)
+            run_sfk(project_dir, "module", "create", "订单管理", "--id", second_module_id)
+            second_doc_path = write_requirement_doc(project_dir, second_doc)
+            run_sfk(project_dir, "artifact", "draft", "requirement", second_doc)
+            run_sfk(project_dir, "artifact", "confirm", "requirement", env=git_env)
+            run_sfk(project_dir, "config", "set", "pluginName", "flow")
+            index_before = load_json(project_dir / ".sfk" / "index.json")
+            self.assertEqual(index_before["currentModule"], second_module_id)
+
+            run_sfk(project_dir, "reset", "apply", "--scope", "project", "--confirm", "确认重置", env=git_env)
+
+            index = load_json(project_dir / ".sfk" / "index.json")
+            self.assertEqual(set(index["modules"].keys()), {MODULE_ID, second_module_id})
+            self.assertEqual(index["currentModule"], second_module_id)
+            self.assertEqual(index["globalConfig"]["pluginName"], "flow")
+            for module_id in (MODULE_ID, second_module_id):
+                state = load_json(project_dir / ".sfk" / "modules" / module_id / "state.json")
+                self.assert_workflow_state_reset(state)
+                self.assertEqual(index["modules"][module_id]["currentPhase"], "requirement")
+            self.assertTrue(first_doc_path.exists())
+            self.assertTrue(second_doc_path.exists())
+
+    def test_reset_project_fails_before_partial_write_when_state_missing(self) -> None:
+        with self.make_project() as tmp:
+            project_dir = Path(tmp)
+            self.init_project(project_dir)
+            self.create_module(project_dir)
+            run_sfk(project_dir, "module", "create", "订单管理", "--id", "order-management")
+            index_path = project_dir / ".sfk" / "index.json"
+            first_state_path = project_dir / ".sfk" / "modules" / MODULE_ID / "state.json"
+            missing_state_path = project_dir / ".sfk" / "modules" / "order-management" / "state.json"
+            before_index = index_path.read_text(encoding="utf-8")
+            before_first_state = first_state_path.read_text(encoding="utf-8")
+            missing_state_path.unlink()
+
+            result = run_sfk(project_dir, "reset", "apply", "--scope", "project", "--confirm", "确认重置", check=False)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("状态文件不存在", result.stderr)
+            self.assertEqual(index_path.read_text(encoding="utf-8"), before_index)
+            self.assertEqual(first_state_path.read_text(encoding="utf-8"), before_first_state)
 
     def test_development_artifact_requires_required_sections(self) -> None:
         git_env = {
@@ -2161,6 +2328,7 @@ class SfkCliTests(unittest.TestCase):
             REPO_ROOT / ".claude" / "commands" / "sfk-test.md",
             REPO_ROOT / ".claude" / "commands" / "sfk-deploy.md",
             REPO_ROOT / ".claude" / "commands" / "sfk-export.md",
+            REPO_ROOT / ".claude" / "commands" / "sfk-reset.md",
         ]
         forbidden_line_patterns = [
             re.compile(r"^\s*-\s*(自定义|其他)(\s|$)"),
@@ -2178,6 +2346,9 @@ class SfkCliTests(unittest.TestCase):
         export_doc = (REPO_ROOT / ".claude" / "commands" / "sfk-export.md").read_text(encoding="utf-8")
         for item in ("export module", "export project", "--zip"):
             self.assertIn(item, export_doc)
+        reset_doc = (REPO_ROOT / ".claude" / "commands" / "sfk-reset.md").read_text(encoding="utf-8")
+        for item in ("reset impact", "reset apply", "确认重置", ".sfk/", "docs/super-flow-kit/", "默认不会删除", "第一次调用只展示影响范围"):
+            self.assertIn(item, reset_doc)
 
 
 if __name__ == "__main__":

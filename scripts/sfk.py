@@ -61,6 +61,8 @@ DEFAULT_CONFIG = {
     "autoSave": True,
     "verbose": True,
 }
+RESET_CONFIRM_PHRASE = "确认重置"
+RESET_SCOPES = {"current-module", "project"}
 MODULE_ID_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$")
 COMMON_SLUGS = {
     "用户认证": "user-auth",
@@ -2293,6 +2295,162 @@ def implementation_approve(args: argparse.Namespace) -> None:
     print(f"approvedForFile：{current_file}")
 
 
+def validate_reset_scope(scope: str) -> str:
+    if scope not in RESET_SCOPES:
+        raise SfkError(f"未知 reset scope：{scope}")
+    return scope
+
+
+def validate_reset_confirmation(confirm: str) -> None:
+    if confirm != RESET_CONFIRM_PHRASE:
+        raise SfkError(f"确认语不匹配。高风险重置必须输入完全一致的确认语：{RESET_CONFIRM_PHRASE}")
+
+
+def reset_target_module_ids(index: dict[str, Any], scope: str) -> list[str]:
+    scope = validate_reset_scope(scope)
+    modules = index.get("modules", {})
+    if scope == "current-module":
+        module_id = index.get("currentModule")
+        if not module_id:
+            raise SfkError("当前项目还没有当前模块，无需重置。请先执行：/sfk-module create <名称>")
+        if module_id not in modules:
+            raise SfkError(f"currentModule 指向不存在的模块：{module_id}")
+        validate_module_id(module_id)
+        return [module_id]
+    if not modules:
+        raise SfkError("当前项目还没有模块，无需执行项目级重置。")
+    module_ids = list(modules.keys())
+    for module_id in module_ids:
+        validate_module_id(module_id)
+    return module_ids
+
+
+def load_reset_targets(index: dict[str, Any], scope: str) -> list[tuple[str, dict[str, Any], dict[str, Any]]]:
+    targets: list[tuple[str, dict[str, Any], dict[str, Any]]] = []
+    for module_id in reset_target_module_ids(index, scope):
+        module_info = index.get("modules", {}).get(module_id, {})
+        state = read_json(state_path(module_id))
+        if state.get("schemaVersion") != SCHEMA_VERSION:
+            raise SfkError(f"模块状态 schemaVersion 不支持：{state.get('schemaVersion')}")
+        targets.append((module_id, module_info, state))
+    return targets
+
+
+def reset_module_impact(module_id: str, module_info: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
+    artifacts = state.get("artifacts", {})
+    artifacts_to_reset: list[dict[str, Any]] = []
+    referenced_files: list[str] = []
+    for phase, phase_name in PHASES:
+        artifact = artifacts.get(phase, {})
+        summary = artifact_summary(artifact)
+        files = summary["files"]
+        referenced_files.extend(files)
+        artifacts_to_reset.append({
+            "phase": phase,
+            "phaseName": phase_name,
+            "status": summary["status"],
+            "quality": summary["quality"],
+            "currentFile": summary["currentFile"],
+            "files": files,
+            "missingFiles": summary["missingFiles"],
+            "emptyFiles": summary["emptyFiles"],
+            "hasUsableFile": summary["hasUsableFile"],
+        })
+    preserved_files = list(dict.fromkeys(referenced_files))
+    return {
+        "moduleId": module_id,
+        "displayName": module_info.get("displayName") or state.get("module", {}).get("displayName") or module_id,
+        "statePath": rel(state_path(module_id)),
+        "docsPath": rel(docs_dir(module_id)) + "/",
+        "currentPhase": state.get("currentPhase", "requirement"),
+        "referencedArtifactFilesPreserved": preserved_files,
+        "artifactsToReset": artifacts_to_reset,
+    }
+
+
+def reset_impact_report(index: dict[str, Any], scope: str) -> dict[str, Any]:
+    scope = validate_reset_scope(scope)
+    targets = load_reset_targets(index, scope)
+    modules = [reset_module_impact(module_id, module_info, state) for module_id, module_info, state in targets]
+    will_modify = [rel(index_path())]
+    will_modify.extend(item["statePath"] for item in modules)
+    return {
+        "operation": "reset",
+        "mode": "impact",
+        "highRisk": True,
+        "scope": scope,
+        "confirmationPhrase": RESET_CONFIRM_PHRASE,
+        "docsPreservedByDefault": True,
+        "willModify": list(dict.fromkeys(will_modify)),
+        "willDelete": [],
+        "willNotModify": [
+            "docs/super-flow-kit/",
+            "business source files",
+        ],
+        "backupRecommendation": [
+            ".sfk/",
+            "docs/super-flow-kit/",
+        ],
+        "modules": modules,
+        "message": f"第一次调用仅展示影响范围；如确认重置，请单独回复：{RESET_CONFIRM_PHRASE}",
+    }
+
+
+def reset_state_for_module(state: dict[str, Any], index: dict[str, Any], timestamp: str, scope: str) -> None:
+    state["currentPhase"] = "requirement"
+    state["artifacts"] = phase_template()
+    state.setdefault("module", {})["updatedAt"] = timestamp
+    state.setdefault("history", []).append({
+        "action": "reset_workflow_state",
+        "timestamp": timestamp,
+        "user": current_owner(index),
+        "detail": f"重置 super-flow-kit 工作流状态，scope={scope}；产出物文档保留。",
+        "files": [],
+    })
+
+
+def sync_index_after_reset(index: dict[str, Any], module_ids: list[str], timestamp: str) -> None:
+    modules = index.setdefault("modules", {})
+    for module_id in module_ids:
+        module_info = modules.setdefault(module_id, {})
+        module_info["currentPhase"] = "requirement"
+        module_info["updatedAt"] = timestamp
+    index.setdefault("project", {})["updatedAt"] = timestamp
+
+
+def reset_impact(args: argparse.Namespace) -> None:
+    index = require_index()
+    report = reset_impact_report(index, args.scope)
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+
+
+def reset_apply(args: argparse.Namespace) -> None:
+    validate_reset_confirmation(args.confirm)
+    index = require_index()
+    scope = validate_reset_scope(args.scope)
+    targets = load_reset_targets(index, scope)
+    timestamp = now_iso()
+    module_ids = [module_id for module_id, _, _ in targets]
+    for _, _, state in targets:
+        reset_state_for_module(state, index, timestamp, scope)
+    for module_id, _, state in targets:
+        write_json(state_path(module_id), state)
+    sync_index_after_reset(index, module_ids, timestamp)
+    write_json(index_path(), index)
+    print("✅ super-flow-kit 状态已重置。")
+    print(f"scope：{scope}")
+    print(f"modules：{', '.join(module_ids)}")
+    print("modified：")
+    print(f"  - {rel(index_path())}")
+    for module_id in module_ids:
+        print(f"  - {rel(state_path(module_id))}")
+    print("preserved：")
+    print("  - docs/super-flow-kit/")
+    print("  - business source files")
+    print("提示：产出物文档未删除，但已不再作为当前工作流状态引用。")
+    print("下一步建议：/sfk-status")
+
+
 def export_module(args: argparse.Namespace) -> None:
     index = require_index()
     module_id = args.module_id
@@ -2411,6 +2569,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_export_project = export_sub.add_parser("project")
     p_export_project.add_argument("--zip", action="store_true")
     p_export_project.set_defaults(func=export_project)
+
+    p_reset = sub.add_parser("reset")
+    reset_sub = p_reset.add_subparsers(dest="reset_command", required=True)
+    p_reset_impact = reset_sub.add_parser("impact")
+    p_reset_impact.add_argument("--scope", choices=sorted(RESET_SCOPES), default="current-module")
+    p_reset_impact.set_defaults(func=reset_impact)
+    p_reset_apply = reset_sub.add_parser("apply")
+    p_reset_apply.add_argument("--scope", choices=sorted(RESET_SCOPES), default="current-module")
+    p_reset_apply.add_argument("--confirm", required=True)
+    p_reset_apply.set_defaults(func=reset_apply)
 
     p_impl = sub.add_parser("implementation")
     impl_sub = p_impl.add_subparsers(dest="implementation_command", required=True)

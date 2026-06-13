@@ -26,6 +26,7 @@ argument-hint: "[操作]"
    - `/sfk-deploy <部署目标/上线范围>`
    - `/sfk-export module [moduleId] [--zip]`
    - `/sfk-export project [--zip]`
+   - `/sfk-reset [current-module|project]`（高风险状态重置；第一次调用只展示影响范围，必须二次确认）
 
 约束：
 
