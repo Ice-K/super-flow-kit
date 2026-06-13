@@ -18,6 +18,8 @@ REQ_DOC = f"docs/super-flow-kit/{MODULE_ID}/20260610120000-{MODULE_ID}-需求分
 UI_DOC = f"docs/super-flow-kit/{MODULE_ID}/20260610123000-{MODULE_ID}-UI设计.md"
 SYS_DOC = f"docs/super-flow-kit/{MODULE_ID}/20260610130000-{MODULE_ID}-系统设计.md"
 DEV_DOC = f"docs/super-flow-kit/{MODULE_ID}/20260610133000-{MODULE_ID}-开发文档.md"
+TEST_DOC = f"docs/super-flow-kit/{MODULE_ID}/20260610140000-{MODULE_ID}-测试文档.md"
+DEPLOY_DOC = f"docs/super-flow-kit/{MODULE_ID}/20260610150000-{MODULE_ID}-部署文档.md"
 
 
 def run_sfk(project_dir: Path, *args: str, check: bool = True, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
@@ -232,6 +234,106 @@ def write_development_doc(project_dir: Path, rel_path: str = DEV_DOC) -> Path:
         "| 时间 | 变更 | 负责人 |\n"
         "| --- | --- | --- |\n"
         "| 2026-06-10 | 创建开发草稿 | 待确认 |\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def write_testing_doc(project_dir: Path, rel_path: str = TEST_DOC) -> Path:
+    path = project_dir / rel_path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "# 用户管理测试文档\n\n"
+        "## 4. 文档信息\n\n"
+        "| 字段 | 值 |\n"
+        "| --- | --- |\n"
+        "| 模块 | 用户管理 |\n"
+        "| 质量状态 | pending |\n\n"
+        "## 9. 测试目标与范围\n\n"
+        "验证用户登录需求的核心路径、失败反馈和基础安全约束。\n\n"
+        "## 3. 需求依据\n\n"
+        "依据已确认的用户管理需求分析文档和登录验收标准。\n\n"
+        "## 5. 系统设计依据\n\n"
+        "依据系统设计中的登录接口、用户数据和限流约束；缺失时记录为风险。\n\n"
+        "## 6. 开发依据\n\n"
+        "依据开发文档中的登录接口开发计划和测试验证计划；缺失时按需求制定测试计划。\n\n"
+        "## 7. 项目测试上下文与约束\n\n"
+        "当前测试上下文以需求验收标准为主，测试命令和环境在执行前确认。\n\n"
+        "## 8. 测试策略\n\n"
+        "组合单元测试、集成测试和手工验证，覆盖成功登录、失败登录和错误反馈。\n\n"
+        "## 10. 测试范围与覆盖矩阵\n\n"
+        "登录成功、凭证错误、空输入和异常反馈均需要覆盖。\n\n"
+        "## 11. 测试用例\n\n"
+        "TC-LOGIN-001 验证有效账号密码登录成功；TC-LOGIN-002 验证错误密码提示。\n\n"
+        "## 12. 测试数据与环境\n\n"
+        "使用测试账号和隔离环境，避免污染真实用户数据。\n\n"
+        "## 13. 自动化与手工执行计划\n\n"
+        "优先运行已有自动化测试；缺少命令时执行手工验证并记录证据。\n\n"
+        "## 14. 执行记录\n\n"
+        "当前文档为测试计划，尚未声明所有测试已经执行通过。\n\n"
+        "## 15. 缺陷与风险\n\n"
+        "测试命令、账号数据和部署环境仍需在执行前确认。\n\n"
+        "## 16. 回归测试范围\n\n"
+        "后续登录接口、用户数据或错误反馈变更时，需要回归登录主流程。\n\n"
+        "## 17. 验收结论\n\n"
+        "当前测试计划覆盖需求验收标准；实际执行结果需在执行记录中补充。\n\n"
+        "## 18. 部署前测试建议\n\n"
+        "部署前至少完成登录成功、失败、限流和回归验证。\n\n"
+        "## 19. 下游影响分析\n\n"
+        "测试结论会影响部署准入、发布风险判断和回滚策略。\n\n"
+        "## 1. 变更记录\n\n"
+        "| 时间 | 变更 | 负责人 |\n"
+        "| --- | --- | --- |\n"
+        "| 2026-06-10 | 创建测试草稿 | 待确认 |\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def write_deployment_doc(project_dir: Path, rel_path: str = DEPLOY_DOC) -> Path:
+    path = project_dir / rel_path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "# 用户管理部署文档\n\n"
+        "## 4. 文档信息\n\n"
+        "| 字段 | 值 |\n"
+        "| --- | --- |\n"
+        "| 模块 | 用户管理 |\n"
+        "| 质量状态 | pending |\n\n"
+        "## 9. 部署目标与范围\n\n"
+        "规划用户管理模块在测试确认后的部署上线步骤，不执行真实部署。\n\n"
+        "## 3. 上线依据与准入条件\n\n"
+        "依据已确认测试文档和上线窗口确认部署准入。\n\n"
+        "## 5. 全模块测试准入检查\n\n"
+        "所有模块需要检测到已确认且可用的测试产出物；风险需在上线前确认。\n\n"
+        "## 6. 架构与运行环境依据\n\n"
+        "依据系统设计和现有部署配置确定运行环境。\n\n"
+        "## 7. 环境与配置管理\n\n"
+        "只记录配置项名称和密钥来源，不记录密钥值。\n\n"
+        "## 8. 构建与制品管理\n\n"
+        "使用确认后的构建命令生成版本化制品。\n\n"
+        "## 10. 数据库 / 数据迁移计划\n\n"
+        "本次不涉及数据库迁移；如后续涉及需补充回滚策略。\n\n"
+        "## 11. 部署流程\n\n"
+        "按准备、发布、验证、观察四步推进部署。\n\n"
+        "## 12. 健康检查与上线验证\n\n"
+        "部署后执行健康检查和登录主流程 smoke 验证。\n\n"
+        "## 13. 监控、日志与告警\n\n"
+        "观察错误率、登录失败率、响应时间和关键日志。\n\n"
+        "## 14. 回滚与恢复方案\n\n"
+        "出现关键错误时回滚到上一稳定版本并验证登录流程。\n\n"
+        "## 15. 安全、权限与合规\n\n"
+        "部署权限需由授权人员执行，敏感配置通过密钥管理系统注入。\n\n"
+        "## 16. 运维交接与值守计划\n\n"
+        "上线窗口安排负责人值守并通知相关干系人。\n\n"
+        "## 17. 风险与待确认问题\n\n"
+        "若存在模块测试产出物未确认，需要在上线前确认风险接受或补测。\n\n"
+        "## 18. 上线后跟踪与后续动作\n\n"
+        "上线后跟踪登录成功率、错误日志和用户反馈。\n\n"
+        "## 1. 变更记录\n\n"
+        "| 时间 | 变更 | 负责人 |\n"
+        "| --- | --- | --- |\n"
+        "| 2026-06-10 | 创建部署草稿 | 待确认 |\n",
         encoding="utf-8",
     )
     return path
@@ -986,6 +1088,150 @@ class SfkCliTests(unittest.TestCase):
             confirmed = run_sfk(project_dir, "artifact", "confirm", "development", env=git_env)
             self.assertIn("qualityCheck：passed", confirmed.stdout)
 
+    def test_testing_artifact_enforces_hard_requirement_dependency(self) -> None:
+        with self.make_project() as tmp:
+            project_dir = Path(tmp)
+            self.init_project(project_dir)
+            self.create_module(project_dir)
+            write_testing_doc(project_dir)
+
+            result = run_sfk(project_dir, "artifact", "draft", "testing", TEST_DOC, check=False)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("硬依赖未满足", result.stderr)
+            self.assertIn("requirement", result.stderr)
+            artifact = self.module_state(project_dir)["artifacts"]["testing"]
+            self.assertEqual(artifact["status"], "pending")
+            self.assertEqual(artifact["files"], [])
+
+    def test_testing_phase_check_allows_missing_soft_dependencies(self) -> None:
+        git_env = {
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "user.name",
+            "GIT_CONFIG_VALUE_0": "Test Owner",
+        }
+        with self.make_project() as tmp:
+            project_dir = Path(tmp)
+            self.init_project(project_dir)
+            self.create_module(project_dir)
+            write_requirement_doc(project_dir)
+            run_sfk(project_dir, "artifact", "draft", "requirement", REQ_DOC)
+            run_sfk(project_dir, "artifact", "confirm", "requirement", env=git_env)
+
+            result = run_sfk(project_dir, "phase", "check", "testing")
+            payload = json.loads(result.stdout)
+            self.assertFalse(payload["blocked"])
+            self.assertTrue(payload["canContinue"])
+            self.assertEqual(payload["hardMissing"], [])
+            self.assertEqual({item["phase"] for item in payload["softMissing"]}, {"development", "system_design"})
+
+    def test_testing_artifact_reuses_generic_draft_confirm_flow(self) -> None:
+        git_env = {
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "user.name",
+            "GIT_CONFIG_VALUE_0": "Test Owner",
+        }
+        with self.make_project() as tmp:
+            project_dir = Path(tmp)
+            self.init_project(project_dir)
+            self.create_module(project_dir)
+            write_requirement_doc(project_dir)
+            run_sfk(project_dir, "artifact", "draft", "requirement", REQ_DOC)
+            run_sfk(project_dir, "artifact", "confirm", "requirement", env=git_env)
+            doc_path = write_testing_doc(project_dir)
+
+            draft = run_sfk(project_dir, "artifact", "draft", "testing", TEST_DOC)
+            self.assertIn("qualityCheck：passed", draft.stdout)
+            state = self.module_state(project_dir)
+            artifact = state["artifacts"]["testing"]
+            self.assertEqual(artifact["status"], "in_progress")
+            self.assertEqual(artifact["quality"], "draft")
+            self.assertEqual(artifact["files"][-1], TEST_DOC)
+            self.assertNotIn("\\", artifact["files"][-1])
+            self.assertFalse(Path(artifact["files"][-1]).is_absolute())
+            self.assertNotIn("implementationApproval", artifact)
+
+            text = doc_path.read_text(encoding="utf-8")
+            self.assertIn("## 1. 文档信息", text)
+            self.assertIn("| 质量状态 | draft |", text)
+
+            confirmed = run_sfk(project_dir, "artifact", "confirm", "testing", env=git_env)
+            self.assertIn("qualityCheck：passed", confirmed.stdout)
+            state = self.module_state(project_dir)
+            artifact = state["artifacts"]["testing"]
+            self.assertEqual(artifact["status"], "done")
+            self.assertEqual(artifact["quality"], "confirmed")
+            self.assertEqual(artifact["owner"], "Test Owner")
+            self.assertNotIn("implementationApproval", artifact)
+            self.assertEqual(state["artifacts"]["development"]["implementationApproval"]["status"], "pending")
+
+            text = doc_path.read_text(encoding="utf-8")
+            self.assertIn("| 质量状态 | confirmed |", text)
+            self.assertIn("| 2026-06-10 | 创建测试草稿 | Test Owner |", text)
+
+    def test_testing_artifact_requires_required_sections(self) -> None:
+        git_env = {
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "user.name",
+            "GIT_CONFIG_VALUE_0": "Test Owner",
+        }
+        with self.make_project() as tmp:
+            project_dir = Path(tmp)
+            self.init_project(project_dir)
+            self.create_module(project_dir)
+            write_requirement_doc(project_dir)
+            run_sfk(project_dir, "artifact", "draft", "requirement", REQ_DOC)
+            run_sfk(project_dir, "artifact", "confirm", "requirement", env=git_env)
+            doc_path = project_dir / TEST_DOC
+            doc_path.parent.mkdir(parents=True, exist_ok=True)
+            doc_path.write_text(
+                "# 用户管理测试文档\n\n"
+                "## 文档信息\n\n"
+                "| 质量状态 | pending |\n\n"
+                "## 测试目标与范围\n\n"
+                "只包含目标，缺少其他必备章节。\n",
+                encoding="utf-8",
+            )
+
+            result = run_sfk(project_dir, "artifact", "draft", "testing", TEST_DOC, check=False)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("测试文档质量检查未通过", result.stderr)
+            self.assertIn("缺少必备章节", result.stderr)
+            self.assertIn("验收结论", result.stderr)
+            artifact = self.module_state(project_dir)["artifacts"]["testing"]
+            self.assertEqual(artifact["status"], "pending")
+            self.assertEqual(artifact["files"], [])
+
+    def test_testing_placeholder_warnings_block_confirm(self) -> None:
+        git_env = {
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "user.name",
+            "GIT_CONFIG_VALUE_0": "Test Owner",
+        }
+        with self.make_project() as tmp:
+            project_dir = Path(tmp)
+            self.init_project(project_dir)
+            self.create_module(project_dir)
+            write_requirement_doc(project_dir)
+            run_sfk(project_dir, "artifact", "draft", "requirement", REQ_DOC)
+            run_sfk(project_dir, "artifact", "confirm", "requirement", env=git_env)
+            doc_path = write_testing_doc(project_dir)
+            text = doc_path.read_text(encoding="utf-8")
+            doc_path.write_text(text.replace("验证用户登录需求的核心路径、失败反馈和基础安全约束。", "[说明本次测试目标。]"), encoding="utf-8")
+
+            draft = run_sfk(project_dir, "artifact", "draft", "testing", TEST_DOC)
+            self.assertIn("qualityCheck：warnings", draft.stdout)
+            self.assertIn("模板占位符", draft.stdout)
+            confirm = run_sfk(project_dir, "artifact", "confirm", "testing", check=False)
+            self.assertNotEqual(confirm.returncode, 0)
+            self.assertIn("模板占位符", confirm.stderr)
+            artifact = self.module_state(project_dir)["artifacts"]["testing"]
+            self.assertEqual(artifact["status"], "in_progress")
+            self.assertEqual(artifact["quality"], "draft")
+
+            doc_path.write_text(doc_path.read_text(encoding="utf-8").replace("[说明本次测试目标。]", "验证用户登录需求的核心路径、失败反馈和基础安全约束。"), encoding="utf-8")
+            confirmed = run_sfk(project_dir, "artifact", "confirm", "testing", env=git_env)
+            self.assertIn("qualityCheck：passed", confirmed.stdout)
+
     def test_status_suggests_system_design_and_reserved_development_next_steps(self) -> None:
         git_env = {
             "GIT_CONFIG_COUNT": "1",
@@ -1033,8 +1279,27 @@ class SfkCliTests(unittest.TestCase):
 
             run_sfk(project_dir, "implementation", "approve", "development", "--summary", "实现用户管理开发计划", env=git_env)
             status = run_sfk(project_dir, "status")
-            self.assertIn("源码实现已获授权", status.stdout)
+            self.assertIn("/sfk-test", status.stdout)
             self.assertIn("实现授权:approved", status.stdout)
+            self.assertNotIn("/sfk-test（后续阶段预留，尚未完整实现）", status.stdout)
+
+            write_testing_doc(project_dir)
+            run_sfk(project_dir, "artifact", "draft", "testing", TEST_DOC)
+            status = run_sfk(project_dir, "status")
+            self.assertIn("继续使用 /sfk-test", status.stdout)
+
+            run_sfk(project_dir, "artifact", "confirm", "testing", env=git_env)
+            status = run_sfk(project_dir, "status")
+            self.assertIn("/sfk-deploy", status.stdout)
+
+            write_deployment_doc(project_dir)
+            run_sfk(project_dir, "artifact", "draft", "deployment", DEPLOY_DOC)
+            status = run_sfk(project_dir, "status")
+            self.assertIn("继续使用 /sfk-deploy", status.stdout)
+
+            run_sfk(project_dir, "artifact", "confirm", "deployment", env=git_env)
+            status = run_sfk(project_dir, "status")
+            self.assertIn("核心交付流程已完成", status.stdout)
 
     def test_context_discover_identifies_new_project(self) -> None:
         with self.make_project() as tmp:
@@ -1238,9 +1503,8 @@ class SfkCliTests(unittest.TestCase):
             run_sfk(project_dir, "artifact", "confirm", "system_design", env=git_env)
             write_development_doc(project_dir)
             run_sfk(project_dir, "artifact", "draft", "development", DEV_DOC)
-            test_doc = f"docs/super-flow-kit/{MODULE_ID}/test.md"
-            (project_dir / test_doc).write_text("# Test doc\n", encoding="utf-8")
-            run_sfk(project_dir, "artifact", "draft", "testing", test_doc)
+            write_testing_doc(project_dir)
+            run_sfk(project_dir, "artifact", "draft", "testing", TEST_DOC)
 
             result = run_sfk(project_dir, "artifact", "impact", "development")
             payload = json.loads(result.stdout)
@@ -1251,12 +1515,230 @@ class SfkCliTests(unittest.TestCase):
             self.assertIn("部署配置", testing["reason"])
             self.assertIn("回滚", testing["reason"])
 
+    def test_artifact_impact_reports_testing_downstream_deployment_review(self) -> None:
+        git_env = {
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "user.name",
+            "GIT_CONFIG_VALUE_0": "Test Owner",
+        }
+        with self.make_project() as tmp:
+            project_dir = Path(tmp)
+            self.init_project(project_dir)
+            self.create_module(project_dir)
+            write_requirement_doc(project_dir)
+            run_sfk(project_dir, "artifact", "draft", "requirement", REQ_DOC)
+            run_sfk(project_dir, "artifact", "confirm", "requirement", env=git_env)
+            write_testing_doc(project_dir)
+            run_sfk(project_dir, "artifact", "draft", "testing", TEST_DOC)
+            run_sfk(project_dir, "artifact", "confirm", "testing", env=git_env)
+            deploy_doc = f"docs/super-flow-kit/{MODULE_ID}/20260610143000-{MODULE_ID}-部署文档.md"
+            write_deployment_doc(project_dir, deploy_doc)
+            run_sfk(project_dir, "artifact", "draft", "deployment", deploy_doc)
+
+            result = run_sfk(project_dir, "artifact", "impact", "testing")
+            payload = json.loads(result.stdout)
+            deployment = next(item for item in payload["downstream"] if item["phase"] == "deployment")
+            self.assertTrue(payload["shouldWarnBeforeChange"])
+            self.assertTrue(deployment["needsReview"])
+            self.assertIn("部署准入", deployment["reason"])
+            self.assertIn("回归范围", deployment["reason"])
+            self.assertIn("回滚策略", deployment["reason"])
+            self.assertEqual(self.module_state(project_dir)["artifacts"]["deployment"]["status"], "in_progress")
+
+    def test_deployment_phase_check_treats_testing_as_soft_dependency(self) -> None:
+        with self.make_project() as tmp:
+            project_dir = Path(tmp)
+            self.init_project(project_dir)
+            self.create_module(project_dir)
+
+            result = run_sfk(project_dir, "phase", "check", "deployment")
+            payload = json.loads(result.stdout)
+            self.assertFalse(payload["blocked"])
+            self.assertTrue(payload["canContinue"])
+            self.assertEqual(payload["hardMissing"], [])
+            self.assertEqual({item["phase"] for item in payload["softMissing"]}, {"testing", "system_design"})
+
+    def test_deployment_readiness_reports_all_modules_testing_status(self) -> None:
+        git_env = {
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "user.name",
+            "GIT_CONFIG_VALUE_0": "Test Owner",
+        }
+        with self.make_project() as tmp:
+            project_dir = Path(tmp)
+            self.init_project(project_dir)
+            self.create_module(project_dir)
+
+            result = run_sfk(project_dir, "deployment", "readiness")
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["totalModules"], 1)
+            self.assertFalse(payload["allModulesTestingConfirmed"])
+            self.assertEqual(payload["notReady"][0]["moduleId"], MODULE_ID)
+            self.assertEqual(payload["notReady"][0]["reason"], "missing")
+
+            write_requirement_doc(project_dir)
+            run_sfk(project_dir, "artifact", "draft", "requirement", REQ_DOC)
+            run_sfk(project_dir, "artifact", "confirm", "requirement", env=git_env)
+            write_testing_doc(project_dir)
+            run_sfk(project_dir, "artifact", "draft", "testing", TEST_DOC)
+            draft = json.loads(run_sfk(project_dir, "deployment", "readiness").stdout)
+            self.assertFalse(draft["allModulesTestingConfirmed"])
+            self.assertEqual(draft["notReady"][0]["reason"], "draft")
+
+            run_sfk(project_dir, "artifact", "confirm", "testing", env=git_env)
+            ready = json.loads(run_sfk(project_dir, "deployment", "readiness").stdout)
+            self.assertTrue(ready["allModulesTestingConfirmed"])
+            self.assertEqual(ready["readyModules"], 1)
+            self.assertEqual(ready["notReadyModules"], 0)
+
+            (project_dir / TEST_DOC).write_text("", encoding="utf-8")
+            empty = json.loads(run_sfk(project_dir, "deployment", "readiness").stdout)
+            self.assertFalse(empty["allModulesTestingConfirmed"])
+            self.assertEqual(empty["notReady"][0]["reason"], "file_empty")
+
+    def test_deployment_readiness_reports_multi_module_gaps(self) -> None:
+        git_env = {
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "user.name",
+            "GIT_CONFIG_VALUE_0": "Test Owner",
+        }
+        with self.make_project() as tmp:
+            project_dir = Path(tmp)
+            self.init_project(project_dir)
+            self.create_module(project_dir)
+            write_requirement_doc(project_dir)
+            run_sfk(project_dir, "artifact", "draft", "requirement", REQ_DOC)
+            run_sfk(project_dir, "artifact", "confirm", "requirement", env=git_env)
+            write_testing_doc(project_dir)
+            run_sfk(project_dir, "artifact", "draft", "testing", TEST_DOC)
+            run_sfk(project_dir, "artifact", "confirm", "testing", env=git_env)
+
+            run_sfk(project_dir, "module", "create", "订单管理", "--id", "order-management")
+            result = run_sfk(project_dir, "deployment", "readiness")
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["totalModules"], 2)
+            self.assertFalse(payload["allModulesTestingConfirmed"])
+            self.assertEqual(payload["readyModules"], 1)
+            self.assertEqual(payload["notReadyModules"], 1)
+            self.assertEqual(payload["notReady"][0]["moduleId"], "order-management")
+
+    def test_deployment_artifact_reuses_generic_draft_confirm_flow(self) -> None:
+        git_env = {
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "user.name",
+            "GIT_CONFIG_VALUE_0": "Test Owner",
+        }
+        with self.make_project() as tmp:
+            project_dir = Path(tmp)
+            self.init_project(project_dir)
+            self.create_module(project_dir)
+            doc_path = write_deployment_doc(project_dir)
+
+            draft = run_sfk(project_dir, "artifact", "draft", "deployment", DEPLOY_DOC)
+            self.assertIn("qualityCheck：passed", draft.stdout)
+            state = self.module_state(project_dir)
+            artifact = state["artifacts"]["deployment"]
+            self.assertEqual(artifact["status"], "in_progress")
+            self.assertEqual(artifact["quality"], "draft")
+            self.assertEqual(artifact["files"][-1], DEPLOY_DOC)
+            self.assertNotIn("\\", artifact["files"][-1])
+            self.assertFalse(Path(artifact["files"][-1]).is_absolute())
+
+            text = doc_path.read_text(encoding="utf-8")
+            self.assertIn("## 1. 文档信息", text)
+            self.assertIn("| 质量状态 | draft |", text)
+
+            confirmed = run_sfk(project_dir, "artifact", "confirm", "deployment", env=git_env)
+            self.assertIn("qualityCheck：passed", confirmed.stdout)
+            state = self.module_state(project_dir)
+            artifact = state["artifacts"]["deployment"]
+            self.assertEqual(artifact["status"], "done")
+            self.assertEqual(artifact["quality"], "confirmed")
+            self.assertEqual(artifact["owner"], "Test Owner")
+            self.assertNotIn("implementationApproval", artifact)
+
+            text = doc_path.read_text(encoding="utf-8")
+            self.assertIn("| 质量状态 | confirmed |", text)
+            self.assertIn("| 2026-06-10 | 创建部署草稿 | Test Owner |", text)
+
+    def test_deployment_artifact_requires_required_sections(self) -> None:
+        with self.make_project() as tmp:
+            project_dir = Path(tmp)
+            self.init_project(project_dir)
+            self.create_module(project_dir)
+            doc_path = project_dir / DEPLOY_DOC
+            doc_path.parent.mkdir(parents=True, exist_ok=True)
+            doc_path.write_text(
+                "# 用户管理部署文档\n\n"
+                "## 文档信息\n\n"
+                "| 质量状态 | pending |\n\n"
+                "## 部署目标与范围\n\n"
+                "只包含部署目标，缺少其他必备章节。\n",
+                encoding="utf-8",
+            )
+
+            result = run_sfk(project_dir, "artifact", "draft", "deployment", DEPLOY_DOC, check=False)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("部署上线文档质量检查未通过", result.stderr)
+            self.assertIn("缺少必备章节", result.stderr)
+            self.assertIn("全模块测试准入检查", result.stderr)
+            artifact = self.module_state(project_dir)["artifacts"]["deployment"]
+            self.assertEqual(artifact["status"], "pending")
+            self.assertEqual(artifact["files"], [])
+
+    def test_deployment_placeholder_warnings_block_confirm(self) -> None:
+        git_env = {
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "user.name",
+            "GIT_CONFIG_VALUE_0": "Test Owner",
+        }
+        with self.make_project() as tmp:
+            project_dir = Path(tmp)
+            self.init_project(project_dir)
+            self.create_module(project_dir)
+            doc_path = write_deployment_doc(project_dir)
+            text = doc_path.read_text(encoding="utf-8")
+            doc_path.write_text(text.replace("规划用户管理模块在测试确认后的部署上线步骤，不执行真实部署。", "[说明部署目标。]"), encoding="utf-8")
+
+            draft = run_sfk(project_dir, "artifact", "draft", "deployment", DEPLOY_DOC)
+            self.assertIn("qualityCheck：warnings", draft.stdout)
+            self.assertIn("模板占位符", draft.stdout)
+            confirm = run_sfk(project_dir, "artifact", "confirm", "deployment", check=False)
+            self.assertNotEqual(confirm.returncode, 0)
+            self.assertIn("模板占位符", confirm.stderr)
+            artifact = self.module_state(project_dir)["artifacts"]["deployment"]
+            self.assertEqual(artifact["status"], "in_progress")
+            self.assertEqual(artifact["quality"], "draft")
+
+            doc_path.write_text(doc_path.read_text(encoding="utf-8").replace("[说明部署目标。]", "规划用户管理模块在测试确认后的部署上线步骤，不执行真实部署。"), encoding="utf-8")
+            confirmed = run_sfk(project_dir, "artifact", "confirm", "deployment", env=git_env)
+            self.assertIn("qualityCheck：passed", confirmed.stdout)
+
+    def test_context_discover_deployment_reports_deploy_files(self) -> None:
+        with self.make_project() as tmp:
+            project_dir = Path(tmp)
+            self.init_project(project_dir)
+            self.create_module(project_dir)
+            (project_dir / "Dockerfile").write_text("FROM python:3.12\n", encoding="utf-8")
+            workflow_dir = project_dir / ".github" / "workflows"
+            workflow_dir.mkdir(parents=True)
+            (workflow_dir / "deploy.yml").write_text("name: deploy\n", encoding="utf-8")
+
+            result = run_sfk(project_dir, "context", "discover", "--phase", "deployment")
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["phase"], "deployment")
+            deploy_files = payload["evidence"]["architecture"]["deployFiles"]
+            self.assertIn("Dockerfile", deploy_files)
+            self.assertIn(".github/workflows/deploy.yml", deploy_files)
+
     def test_command_docs_do_not_use_fixed_custom_options(self) -> None:
         command_paths = [
             REPO_ROOT / ".claude" / "commands" / "sfk-req.md",
             REPO_ROOT / ".claude" / "commands" / "sfk-ui.md",
             REPO_ROOT / ".claude" / "commands" / "sfk-design.md",
             REPO_ROOT / ".claude" / "commands" / "sfk-dev.md",
+            REPO_ROOT / ".claude" / "commands" / "sfk-test.md",
+            REPO_ROOT / ".claude" / "commands" / "sfk-deploy.md",
         ]
         forbidden_line_patterns = [
             re.compile(r"^\s*-\s*(自定义|其他)(\s|$)"),

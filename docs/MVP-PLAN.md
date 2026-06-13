@@ -2,7 +2,7 @@
 
 ## Context
 
-本文件最初记录 `super-flow-kit` v0.1 MVP 实现计划；随着 v0.2 UI 设计、v0.3 系统设计和 v0.4 开发阶段切片推进，现在同时作为迭代记录与近期计划。`super-flow-kit.md` 仍是权威规格文档，远程仓库地址：`https://github.com/Ice-K/super-flow-kit.git`。
+本文件最初记录 `super-flow-kit` v0.1 MVP 实现计划；随着 v0.2 UI 设计、v0.3 系统设计、v0.4 开发阶段、v0.5 功能测试和 v0.6 部署上线切片推进，现在同时作为迭代记录与近期计划。`super-flow-kit.md` 仍是权威规格文档，远程仓库地址：`https://github.com/Ice-K/super-flow-kit.git`。
 
 目标是实现一个最小可用的 Claude Code 工作流插件，完成以下闭环：
 
@@ -36,6 +36,8 @@
 .claude/commands/sfk-ui.md
 .claude/commands/sfk-design.md
 .claude/commands/sfk-dev.md
+.claude/commands/sfk-test.md
+.claude/commands/sfk-deploy.md
 ```
 
 ### 脚本
@@ -55,6 +57,8 @@ templates/requirement.md
 templates/ui-design.md
 templates/system-design.md
 templates/development.md
+templates/testing.md
+templates/deployment.md
 ```
 
 ### 测试
@@ -112,11 +116,23 @@ python scripts/sfk.py artifact current requirement
 python scripts/sfk.py context discover --phase requirement
 python scripts/sfk.py context discover --phase ui_design
 python scripts/sfk.py context discover --phase system_design
+python scripts/sfk.py context discover --phase development
+python scripts/sfk.py context discover --phase testing
+python scripts/sfk.py context discover --phase deployment
 python scripts/sfk.py artifact impact requirement
 python scripts/sfk.py artifact impact system_design
+python scripts/sfk.py artifact impact development
+python scripts/sfk.py artifact impact testing
 python scripts/sfk.py phase check ui_design
 python scripts/sfk.py phase check system_design
+python scripts/sfk.py phase check development
+python scripts/sfk.py phase check testing
+python scripts/sfk.py phase check deployment
+python scripts/sfk.py deployment readiness
 python scripts/sfk.py artifact current system_design
+python scripts/sfk.py artifact current development
+python scripts/sfk.py artifact current testing
+python scripts/sfk.py artifact current deployment
 python scripts/sfk.py artifact draft requirement docs/super-flow-kit/user-management/<需求文档>.md
 python scripts/sfk.py artifact confirm requirement
 python scripts/sfk.py status
@@ -132,11 +148,12 @@ python scripts/sfk.py status
 - v0.3.1 系统设计补强：将 API 设计和数据库设计作为系统设计必备内容，模板覆盖表结构、字段、关系、索引、迁移、接口清单、请求/响应、错误码、鉴权、分页、幂等、限流和外部集成。
 - v0.4 `/sfk-dev` 基础开发阶段计划：基于已确认需求和系统设计生成开发文档/开发计划，复用通用 `artifact draft/confirm/current` 状态机；本阶段不自动修改业务代码，不将开发文档确认等同于代码实现完成。
 - v0.4.1 源码实现二次确认门禁：开发文档 confirmed 后仍需通过 `scripts/sfk.py implementation approve development --summary ...` 记录实现授权；授权前不得修改业务源码，授权也不代表实现完成。
+- v0.5 `/sfk-test` 功能测试阶段闭环：基于已确认需求以及可选系统设计/开发文档生成测试文档，复用通用 `artifact draft/confirm/current` 状态机；脚本层强制需求硬依赖、测试文档必备章节和确认前模板占位符清理，软依赖缺失时必须记录假设和风险。
+- v0.6 `/sfk-deploy` 部署上线阶段闭环：生成部署文档/上线计划，复用通用 `artifact draft/confirm/current` 状态机；部署阶段将 testing 作为软依赖，但新增只读 `scripts/sfk.py deployment readiness` 检查所有模块是否存在已确认且可用的测试产出物，并在命令流程中提示用户风险。
 - REQ 阶段补齐脚本层质量门禁：`artifact draft/confirm requirement` 会检查必备章节和模板占位符，输出 `qualityCheck`，确认前不得残留模板占位符。
 
 ## 不在本轮实现
 
-- 完整 `/sfk-test`、`/sfk-deploy` 流程。
 - 自动修改业务代码并验证真实实现完成的 `/sfk-dev` 增强流程。
 - `/sfk-export`。
 - `/sfk-reset`。

@@ -46,7 +46,7 @@ PHASE_DEPENDENCIES = {
     "system_design": {"hard": ["requirement"], "soft": []},
     "development": {"hard": ["requirement", "system_design"], "soft": ["ui_design"]},
     "testing": {"hard": ["requirement"], "soft": ["development", "system_design"]},
-    "deployment": {"hard": ["testing"], "soft": ["system_design"]},
+    "deployment": {"hard": [], "soft": ["testing", "system_design"]},
 }
 DEFAULT_CONFIG = {
     "pluginName": "sfk",
@@ -195,7 +195,81 @@ DEVELOPMENT_BRACKET_PLACEHOLDER_RE = re.compile(
     r"单元测试/集成测试/手工验证/静态检查|覆盖范围|通过标准|序号|开发动作|前置条件|回滚或恢复方式|"
     r"待确认问题|影响|建议|是/否|原因|动作)[^\]]*\]"
 )
-QUALITY_CHECK_PHASES = {"requirement", "system_design", "development"}
+TESTING_REQUIRED_SECTIONS = [
+    "文档信息",
+    "测试目标与范围",
+    "需求依据",
+    "系统设计依据",
+    "开发依据",
+    "项目测试上下文与约束",
+    "测试策略",
+    "测试范围与覆盖矩阵",
+    "测试用例",
+    "测试数据与环境",
+    "自动化与手工执行计划",
+    "执行记录",
+    "缺陷与风险",
+    "回归测试范围",
+    "验收结论",
+    "部署前测试建议",
+    "下游影响分析",
+    "变更记录",
+]
+TESTING_TEMPLATE_FIELDS = {
+    "displayName",
+    "moduleId",
+    "version",
+    "quality",
+    "createdAt",
+    "updatedAt",
+    "owner",
+}
+TESTING_BRACKET_PLACEHOLDER_RE = re.compile(
+    r"\[(?:说明|引用|列出|全新项目|已有业务文档|已有代码|已有 UI 代码|"
+    r"测试目标|测试范围|不测试范围|需求编号|验收标准|覆盖方式|"
+    r"系统设计文档|开发文档|缺失时说明假设|入口|配置|测试框架|CI|命令|环境|约束|"
+    r"单元测试|集成测试|端到端测试|手工验证|回归测试|静态检查|安全检查|性能检查|"
+    r"功能点|测试类型|用例编号|前置条件|步骤|预期结果|优先级|测试数据|账号|环境变量|"
+    r"执行命令|手工步骤|执行状态|结果|证据|执行人|缺陷|风险|影响|建议|"
+    r"通过/不通过/未执行|部署准入|上线验证|回滚|是/否|动作)[^\]]*\]"
+)
+DEPLOYMENT_REQUIRED_SECTIONS = [
+    "文档信息",
+    "部署目标与范围",
+    "上线依据与准入条件",
+    "全模块测试准入检查",
+    "架构与运行环境依据",
+    "环境与配置管理",
+    "构建与制品管理",
+    "数据库 / 数据迁移计划",
+    "部署流程",
+    "健康检查与上线验证",
+    "监控、日志与告警",
+    "回滚与恢复方案",
+    "安全、权限与合规",
+    "运维交接与值守计划",
+    "风险与待确认问题",
+    "上线后跟踪与后续动作",
+    "变更记录",
+]
+DEPLOYMENT_TEMPLATE_FIELDS = {
+    "displayName",
+    "moduleId",
+    "version",
+    "quality",
+    "createdAt",
+    "updatedAt",
+    "owner",
+}
+DEPLOYMENT_BRACKET_PLACEHOLDER_RE = re.compile(
+    r"\[(?:说明|引用|列出|全新项目|已有业务文档|已有代码|已有 UI 代码|"
+    r"部署目标|上线范围|不包含范围|测试状态|测试产出物|风险|建议动作|"
+    r"架构文档|运行环境|平台|区域|域名|网络|配置项|环境变量|密钥来源|不要填写密钥值|"
+    r"构建命令|制品|镜像|版本号|数据迁移|回填|兼容策略|部署步骤|负责人|审批|"
+    r"健康检查|上线验证|监控|日志|告警|回滚|恢复|RTO|RPO|权限|合规|值守|通知|"
+    r"待确认问题|影响|建议|是/否|动作|通过/不通过/未确认)[^\]]*\]"
+)
+QUALITY_CHECK_PHASES = {"requirement", "system_design", "development", "testing", "deployment"}
 
 
 class SfkError(Exception):
@@ -534,6 +608,108 @@ def validate_development_document(file_path: str, confirmed: bool) -> dict[str, 
     return {"errors": errors, "warnings": warnings}
 
 
+def detect_testing_placeholders(text: str) -> list[str]:
+    placeholders: list[str] = []
+    seen: set[str] = set()
+    for line_number, line in enumerate(text.splitlines(), start=1):
+        for match in re.finditer(r"\{([A-Za-z][A-Za-z0-9_]*)\}", line):
+            if match.group(1) not in TESTING_TEMPLATE_FIELDS:
+                continue
+            item = f"第 {line_number} 行：{match.group(0)}"
+            if item not in seen:
+                placeholders.append(item)
+                seen.add(item)
+        for match in TESTING_BRACKET_PLACEHOLDER_RE.finditer(line):
+            item = f"第 {line_number} 行：{match.group(0)}"
+            if item not in seen:
+                placeholders.append(item)
+                seen.add(item)
+    return placeholders
+
+
+def validate_testing_document(file_path: str, confirmed: bool) -> dict[str, list[str]]:
+    path = root() / file_path
+    errors: list[str] = []
+    warnings: list[str] = []
+    if not path.exists() or not path.is_file():
+        errors.append(f"测试文档不存在：{file_path}")
+        return {"errors": errors, "warnings": warnings}
+    if path.stat().st_size <= 0:
+        errors.append(f"测试文档为空：{file_path}")
+        return {"errors": errors, "warnings": warnings}
+    if path.suffix.lower() != ".md":
+        errors.append(f"测试文档必须是 Markdown 文件：{file_path}")
+        return {"errors": errors, "warnings": warnings}
+
+    text = path.read_text(encoding="utf-8")
+    titles = set(markdown_h2_titles(text))
+    missing_sections = [section for section in TESTING_REQUIRED_SECTIONS if section not in titles]
+    if missing_sections:
+        errors.append("测试文档缺少必备章节：" + "、".join(missing_sections))
+
+    placeholders = detect_testing_placeholders(text)
+    if placeholders:
+        message = "测试文档仍包含模板占位符：" + "；".join(placeholders[:10])
+        if len(placeholders) > 10:
+            message += f"；另有 {len(placeholders) - 10} 处"
+        if confirmed:
+            errors.append(message)
+        else:
+            warnings.append(message)
+    return {"errors": errors, "warnings": warnings}
+
+
+def detect_deployment_placeholders(text: str) -> list[str]:
+    placeholders: list[str] = []
+    seen: set[str] = set()
+    for line_number, line in enumerate(text.splitlines(), start=1):
+        for match in re.finditer(r"\{([A-Za-z][A-Za-z0-9_]*)\}", line):
+            if match.group(1) not in DEPLOYMENT_TEMPLATE_FIELDS:
+                continue
+            item = f"第 {line_number} 行：{match.group(0)}"
+            if item not in seen:
+                placeholders.append(item)
+                seen.add(item)
+        for match in DEPLOYMENT_BRACKET_PLACEHOLDER_RE.finditer(line):
+            item = f"第 {line_number} 行：{match.group(0)}"
+            if item not in seen:
+                placeholders.append(item)
+                seen.add(item)
+    return placeholders
+
+
+def validate_deployment_document(file_path: str, confirmed: bool) -> dict[str, list[str]]:
+    path = root() / file_path
+    errors: list[str] = []
+    warnings: list[str] = []
+    if not path.exists() or not path.is_file():
+        errors.append(f"部署文档不存在：{file_path}")
+        return {"errors": errors, "warnings": warnings}
+    if path.stat().st_size <= 0:
+        errors.append(f"部署文档为空：{file_path}")
+        return {"errors": errors, "warnings": warnings}
+    if path.suffix.lower() != ".md":
+        errors.append(f"部署文档必须是 Markdown 文件：{file_path}")
+        return {"errors": errors, "warnings": warnings}
+
+    text = path.read_text(encoding="utf-8")
+    titles = set(markdown_h2_titles(text))
+    missing_sections = [section for section in DEPLOYMENT_REQUIRED_SECTIONS if section not in titles]
+    if missing_sections:
+        errors.append("部署文档缺少必备章节：" + "、".join(missing_sections))
+
+    placeholders = detect_deployment_placeholders(text)
+    if placeholders:
+        message = "部署文档仍包含模板占位符：" + "；".join(placeholders[:10])
+        if len(placeholders) > 10:
+            message += f"；另有 {len(placeholders) - 10} 处"
+        if confirmed:
+            errors.append(message)
+        else:
+            warnings.append(message)
+    return {"errors": errors, "warnings": warnings}
+
+
 def validate_artifact_quality_document(phase: str, file_path: str, confirmed: bool) -> dict[str, list[str]]:
     if phase == "requirement":
         return validate_requirement_document(file_path, confirmed)
@@ -541,6 +717,10 @@ def validate_artifact_quality_document(phase: str, file_path: str, confirmed: bo
         return validate_system_design_document(file_path, confirmed)
     if phase == "development":
         return validate_development_document(file_path, confirmed)
+    if phase == "testing":
+        return validate_testing_document(file_path, confirmed)
+    if phase == "deployment":
+        return validate_deployment_document(file_path, confirmed)
     return {"errors": [], "warnings": []}
 
 
@@ -895,6 +1075,54 @@ def artifact_summary(artifact: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def deployment_readiness_report(index: dict[str, Any]) -> dict[str, Any]:
+    modules = index.get("modules", {})
+    items: list[dict[str, Any]] = []
+    ready_count = 0
+    for module_id, module_info in modules.items():
+        item = {
+            "moduleId": module_id,
+            "displayName": module_info.get("displayName") or module_id,
+            "statePath": module_info.get("statePath") or rel(state_path(module_id)),
+            "satisfied": False,
+            "reason": "state_missing",
+            "testingStatus": None,
+            "quality": None,
+            "currentFile": None,
+            "files": [],
+            "missingFiles": [],
+            "emptyFiles": [],
+        }
+        try:
+            state = read_json(state_path(module_id))
+            status = dependency_status(state, "testing")
+            item.update({
+                "satisfied": status["satisfied"],
+                "reason": status["reason"],
+                "testingStatus": status["status"],
+                "quality": status["quality"],
+                "files": status["files"],
+                "currentFile": status["files"][-1] if status["files"] else None,
+                "missingFiles": status["missingFiles"],
+                "emptyFiles": status["emptyFiles"],
+            })
+            if status["satisfied"]:
+                ready_count += 1
+        except SfkError as exc:
+            item["reason"] = str(exc)
+        items.append(item)
+    not_ready = [item for item in items if not item["satisfied"]]
+    return {
+        "totalModules": len(items),
+        "readyModules": ready_count,
+        "notReadyModules": len(not_ready),
+        "allModulesTestingConfirmed": bool(items) and not not_ready,
+        "modules": items,
+        "notReady": not_ready,
+        "message": "所有模块均检测到已确认且可用的测试产出物。" if items and not not_ready else "存在模块未检测到已确认且可用的测试产出物，部署前需要提示用户确认风险。",
+    }
+
+
 def implementation_approval_status(state: dict[str, Any]) -> dict[str, Any]:
     development = state.get("artifacts", {}).get("development", {})
     approval = ensure_implementation_approval(development)
@@ -965,6 +1193,8 @@ def artifact_impact_report(state: dict[str, Any], phase: str) -> dict[str, Any]:
                 reason = "系统设计变更可能影响开发实现、API / 接口设计、数据库设计、测试覆盖、部署配置、监控和回滚策略。"
             elif phase == "development":
                 reason = "开发文档变更可能影响测试覆盖、测试用例、部署配置、数据迁移、监控和回滚策略。"
+            elif phase == "testing":
+                reason = "测试文档变更可能影响部署准入、发布风险判断、回归范围、上线验证和回滚策略。"
             else:
                 reason = f"{PHASE_NAMES[phase]} 变更可能影响该阶段产出物。"
             if summary["missingFiles"]:
@@ -1213,6 +1443,12 @@ def next_step_suggestion(state: dict[str, Any]) -> str:
     ui_design = artifacts.get("ui_design", {})
     system_design = artifacts.get("system_design", {})
     development = artifacts.get("development", {})
+    testing = artifacts.get("testing", {})
+    deployment = artifacts.get("deployment", {})
+    if artifact_is_satisfied(deployment):
+        return "💡 下一步建议：核心交付流程已完成；请按已确认部署文档执行上线、监控和回滚预案。"
+    if deployment.get("status") == "in_progress" or deployment.get("quality") == "draft":
+        return "💡 下一步建议：继续使用 /sfk-deploy 完善并确认部署文档草稿。"
     if not artifact_is_satisfied(requirement):
         if requirement.get("status") == "in_progress" or requirement.get("quality") == "draft":
             return "💡 下一步建议：继续使用 /sfk-req 完善并确认需求草稿。"
@@ -1221,7 +1457,11 @@ def next_step_suggestion(state: dict[str, Any]) -> str:
         if artifact_is_satisfied(development):
             approval_status = implementation_approval_status(state)
             if approval_status["canImplement"]:
-                return "💡 下一步建议：源码实现已获授权，可按开发文档开始实现；完成后建议进入 /sfk-test（后续阶段预留，尚未完整实现）。"
+                if artifact_is_satisfied(testing):
+                    return "💡 下一步建议：测试文档已确认，可继续进入 /sfk-deploy；部署前会检查所有模块测试产出物是否已确认且可用。"
+                if testing.get("status") == "in_progress" or testing.get("quality") == "draft":
+                    return "💡 下一步建议：继续使用 /sfk-test 完善并确认测试文档草稿。"
+                return "💡 下一步建议：源码实现已获授权，可按开发文档完成实现后进入 /sfk-test。"
             if approval_status["reason"] == "implementation_approval_stale":
                 return "💡 下一步建议：开发文档已更新，请使用 /sfk-dev 重新进行源码实现二次确认。"
             return "💡 下一步建议：使用 /sfk-dev 进行源码实现二次确认；开发文档 confirmed 不代表已授权修改源码。"
@@ -1434,6 +1674,12 @@ def artifact_impact(args: argparse.Namespace) -> None:
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 
+def deployment_readiness(_: argparse.Namespace) -> None:
+    index = require_index()
+    result = deployment_readiness_report(index)
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+
+
 def implementation_current(args: argparse.Namespace) -> None:
     if args.phase != "development":
         raise SfkError("当前仅支持查看 development 阶段的源码实现授权状态。")
@@ -1568,6 +1814,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_phase_check = phase_sub.add_parser("check")
     p_phase_check.add_argument("phase")
     p_phase_check.set_defaults(func=phase_check)
+
+    p_deployment = sub.add_parser("deployment")
+    deployment_sub = p_deployment.add_subparsers(dest="deployment_command", required=True)
+    p_deployment_readiness = deployment_sub.add_parser("readiness")
+    p_deployment_readiness.set_defaults(func=deployment_readiness)
 
     p_impl = sub.add_parser("implementation")
     impl_sub = p_impl.add_subparsers(dest="implementation_command", required=True)

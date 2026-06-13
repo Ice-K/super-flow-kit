@@ -2,10 +2,10 @@
 
 `super-flow-kit` 是一个面向 Claude Code 的结构化软件交付工作流插件，目标是帮助用户从需求分析到部署上线，按阶段沉淀项目上下文、产出物和工作流状态。
 
-当前版本从 **v0.1 MVP** 继续演进，已覆盖需求分析、UI 设计和系统设计闭环，并开始进入 v0.4 开发阶段计划：
+当前版本从 **v0.1 MVP** 继续演进，已覆盖需求分析、UI 设计、系统设计、开发计划、功能测试和部署上线闭环：
 
 ```text
-初始化项目 → 创建模块 → 需求分析 → UI 设计 → 系统设计 → 开发计划 → 保存产出物 → 查看状态看板
+初始化项目 → 创建模块 → 需求分析 → UI 设计 → 系统设计 → 开发计划 → 功能测试 → 部署上线 → 保存产出物 → 查看状态看板
 ```
 
 ## 当前状态
@@ -47,10 +47,20 @@ v0.4.1 源码实现二次确认门禁已实现：
 - `scripts/sfk.py implementation approve development --summary ...` 会记录实现授权；授权前 `/sfk-dev` 不得修改业务源码。
 - 实现授权只表示允许开始按开发文档修改源码，不代表源码已经实现完成。
 
+v0.5 功能测试阶段已实现：
+
+- `/sfk-test` — 进入功能测试阶段，基于已确认需求以及可选系统设计/开发文档生成或更新测试文档。
+- 测试阶段硬依赖已确认且可用的需求产出物；系统设计和开发文档是软依赖，缺失时可以带假设继续但必须记录风险。
+- 脚本层会校验测试文档必备章节，确认前不得残留模板占位符；测试文档 confirmed 不代表所有测试已执行通过，也不代表部署已获准。
+
+v0.6 部署上线阶段已实现：
+
+- `/sfk-deploy` — 进入部署上线阶段，生成或更新部署文档/上线计划。
+- 部署阶段将测试作为软依赖处理，但 `/sfk-deploy` 前必须执行 `scripts/sfk.py deployment readiness`，检查所有模块是否存在已确认且可用的测试产出物，并向用户提示风险。
+- 脚本层会校验部署文档必备章节，确认前不得残留模板占位符；部署文档 confirmed 不代表真实部署已经执行，也不代表生产环境已经变更。
+
 暂未完整实现：
 
-- `/sfk-test`
-- `/sfk-deploy`
 - `/sfk-export`
 - `/sfk-reset`
 - `/sfk-code-review`
@@ -65,7 +75,7 @@ v0.4.1 源码实现二次确认门禁已实现：
 需求分析 → UI 设计 → 系统设计 → 软件开发 → 功能测试 → 部署上线
 ```
 
-v0.1 完整实现 **需求分析** 阶段；v0.2 以 `/sfk-ui` 形式实现 **UI 设计** 的窄范围切片；v0.3 以 `/sfk-design` 形式实现带脚本层兜底的 **系统设计** 闭环；v0.3.1 补强系统设计中的 **数据库设计** 和 **API / 接口设计**；v0.4 以 `/sfk-dev` 启动 **软件开发计划** 产出物闭环。后续测试和部署阶段已在规格和状态模型中预留。
+v0.1 完整实现 **需求分析** 阶段；v0.2 以 `/sfk-ui` 形式实现 **UI 设计** 的窄范围切片；v0.3 以 `/sfk-design` 形式实现带脚本层兜底的 **系统设计** 闭环；v0.3.1 补强系统设计中的 **数据库设计** 和 **API / 接口设计**；v0.4 以 `/sfk-dev` 启动 **软件开发计划** 产出物闭环；v0.4.1 增加源码实现二次确认；v0.5 以 `/sfk-test` 实现 **功能测试** 产出物闭环；v0.6 以 `/sfk-deploy` 实现 **部署上线** 产出物闭环。
 
 ## 推荐使用路径
 
@@ -82,6 +92,8 @@ v0.1 完整实现 **需求分析** 阶段；v0.2 以 `/sfk-ui` 形式实现 **UI
 /sfk-ui 设计用户登录界面
 /sfk-design 设计用户管理系统架构
 /sfk-dev 制定用户管理开发计划
+/sfk-test 制定用户管理测试计划
+/sfk-deploy 制定用户管理部署计划
 ```
 
 在 slash command 交互中，`/sfk-module create 用户管理` 会先由 Claude 根据语义推荐合法的 `moduleId`（如 `user-management`），再调用底层脚本；如无法可靠推荐，可使用 `--id` 显式指定。
@@ -115,7 +127,9 @@ v0.1 完整实现 **需求分析** 阶段；v0.2 以 `/sfk-ui` 形式实现 **UI
     ├── sfk-req.md
     ├── sfk-ui.md
     ├── sfk-design.md
-    └── sfk-dev.md
+    ├── sfk-dev.md
+    ├── sfk-test.md
+    └── sfk-deploy.md
 
 scripts/
 ├── sfk.py
@@ -132,7 +146,9 @@ templates/
 ├── requirement.md
 ├── ui-design.md
 ├── system-design.md
-└── development.md
+├── development.md
+├── testing.md
+└── deployment.md
 
 docs/
 └── MVP-PLAN.md
@@ -157,7 +173,9 @@ docs/
         ├── yyyyMMddHHmmss-{moduleId}-需求分析.md
         ├── yyyyMMddHHmmss-{moduleId}-UI设计.md
         ├── yyyyMMddHHmmss-{moduleId}-系统设计.md
-        └── yyyyMMddHHmmss-{moduleId}-开发文档.md
+        ├── yyyyMMddHHmmss-{moduleId}-开发文档.md
+        ├── yyyyMMddHHmmss-{moduleId}-测试文档.md
+        └── yyyyMMddHHmmss-{moduleId}-部署文档.md
 ```
 
 这些运行时状态默认被 `.gitignore` 忽略：
@@ -193,14 +211,22 @@ python scripts/sfk.py context discover --phase requirement
 python scripts/sfk.py context discover --phase ui_design
 python scripts/sfk.py context discover --phase system_design
 python scripts/sfk.py context discover --phase development
+python scripts/sfk.py context discover --phase testing
+python scripts/sfk.py context discover --phase deployment
 python scripts/sfk.py artifact impact requirement
 python scripts/sfk.py artifact impact system_design
 python scripts/sfk.py artifact impact development
+python scripts/sfk.py artifact impact testing
 python scripts/sfk.py phase check ui_design
 python scripts/sfk.py phase check system_design
 python scripts/sfk.py phase check development
+python scripts/sfk.py phase check testing
+python scripts/sfk.py phase check deployment
+python scripts/sfk.py deployment readiness
 python scripts/sfk.py artifact current system_design
 python scripts/sfk.py artifact current development
+python scripts/sfk.py artifact current testing
+python scripts/sfk.py artifact current deployment
 python scripts/sfk.py implementation current development
 python scripts/sfk.py implementation approve development --summary "按已确认开发文档开始实现"
 python scripts/sfk.py tui select --title "选择方案" --mode single --option mvp="MVP 方案" --option full="完整方案"
@@ -236,6 +262,10 @@ rm -rf .sfk docs/super-flow-kit
 - `/sfk-design` 草稿必须包含系统设计必备章节，尤其是数据库设计和 API / 接口设计；确认时不得残留模板占位符，否则脚本会拒绝更新为 `done/confirmed`。
 - `/sfk-dev` 草稿必须包含开发文档必备章节；确认时不得残留模板占位符。v0.4 的 `/sfk-dev` 只确认开发计划产出物，不代表业务代码已经实现。
 - `/sfk-dev` 源码实现前必须通过 `scripts/sfk.py implementation approve development --summary ...` 记录二次确认；`implementationApproval.status = approved` 只表示允许开始实现，不表示实现完成。
+- `/sfk-test` 草稿必须包含测试文档必备章节；确认时不得残留模板占位符。需求是硬依赖，系统设计和开发文档是软依赖，可带假设继续但必须记录依据不足。
+- `/sfk-test` 只确认测试文档，不代表所有测试已执行通过，也不代表部署已获准。
+- `/sfk-deploy` 草稿必须包含部署文档必备章节；确认时不得残留模板占位符。测试在部署阶段作为软依赖，但必须通过 `scripts/sfk.py deployment readiness` 检查所有模块是否有已确认且可用的测试产出物，并向用户提示风险。
+- `/sfk-deploy` 只确认部署文档，不代表真实部署已经执行，也不代表生产环境已经变更。
 - `/sfk-req` 在写入草稿前会展示所有问题与用户选择，并提供确认、修改、回退、重选和取消分支。
 - `scripts/sfk.py tui select` 是无状态的通用交互选择能力；slash command 仍保留文本/编号选择作为兜底。
 

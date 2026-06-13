@@ -21,6 +21,8 @@ argument-hint: "[操作]"
    - `/sfk-ui <UI 目标>`
    - `/sfk-design <系统/架构目标>`
    - `/sfk-dev <开发目标/实现范围>`
+   - `/sfk-test <测试目标/测试范围>`
+   - `/sfk-deploy <部署目标/上线范围>`
 
 约束：
 
