@@ -64,15 +64,6 @@ DEFAULT_CONFIG = {
 RESET_CONFIRM_PHRASE = "确认重置"
 RESET_SCOPES = {"current-module", "project"}
 MODULE_ID_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$")
-COMMON_SLUGS = {
-    "用户认证": "user-auth",
-    "用户登录": "user-login",
-    "登录": "login",
-    "支付模块": "payment-module",
-    "支付": "payment",
-    "订单模块": "order-module",
-    "订单": "order",
-}
 SKIP_DISCOVERY_DIRS = {
     ".git",
     ".sfk",
@@ -1762,14 +1753,12 @@ def validate_module_id(module_id: str) -> None:
 
 def suggest_module_id(display_name: str) -> str:
     text = display_name.strip()
-    if text in COMMON_SLUGS:
-        return COMMON_SLUGS[text]
     candidate = re.sub(r"[^A-Za-z0-9]+", "-", text).strip("-").lower()
     if candidate and MODULE_ID_RE.fullmatch(candidate):
         return candidate
     raise SfkError(
-        "脚本层无法可靠生成 moduleId。请通过 /sfk-module create <名称> 让 Claude 在交互中推荐，"
-        "或使用 --id 显式指定，例如：--id user-management"
+        "脚本层无法根据模块名称可靠生成合法 moduleId。请使用 --id 显式指定，"
+        "例如：--id user-management"
     )
 
 
@@ -1887,7 +1876,7 @@ def module_create(args: argparse.Namespace) -> None:
     validate_module_id(module_id)
     modules = index.setdefault("modules", {})
     if module_id in modules:
-        raise SfkError(f"moduleId 已存在：{module_id}")
+        raise SfkError(f"moduleId 已存在：{module_id}。请使用 --id 指定其他 moduleId。")
     for existing in modules.values():
         if existing.get("displayName") == display_name:
             raise SfkError(f"displayName 已存在：{display_name}")

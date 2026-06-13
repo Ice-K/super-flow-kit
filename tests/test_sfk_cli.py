@@ -630,6 +630,16 @@ class SfkCliTests(unittest.TestCase):
             self.assertNotEqual(invalid.returncode, 0)
             self.assertIn("moduleId 只能包含", invalid.stderr)
 
+            chinese_without_id = run_sfk(project_dir, "module", "create", "用户登录", check=False)
+            self.assertNotEqual(chinese_without_id.returncode, 0)
+            self.assertIn("无法根据模块名称可靠生成合法 moduleId", chinese_without_id.stderr)
+            self.assertIn("--id", chinese_without_id.stderr)
+
+            english = run_sfk(project_dir, "module", "create", "user profile")
+            self.assertIn("moduleId：user-profile（脚本自动生成）", english.stdout)
+            index = load_json(project_dir / ".sfk" / "index.json")
+            self.assertIn("user-profile", index["modules"])
+
             self.create_module(project_dir)
             duplicate = run_sfk(
                 project_dir,
@@ -642,6 +652,7 @@ class SfkCliTests(unittest.TestCase):
             )
             self.assertNotEqual(duplicate.returncode, 0)
             self.assertIn("moduleId 已存在", duplicate.stderr)
+            self.assertIn("请使用 --id 指定其他 moduleId", duplicate.stderr)
 
     def test_artifact_rejects_paths_outside_project_root(self) -> None:
         with self.make_project() as tmp:
