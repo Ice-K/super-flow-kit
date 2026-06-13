@@ -28,6 +28,7 @@ PHASES = [
     ("ui_design", "UI 设计"),
     ("system_design", "系统设计"),
     ("development", "软件开发"),
+    ("code_review", "代码审查"),
     ("testing", "功能测试"),
     ("deployment", "部署上线"),
 ]
@@ -37,6 +38,7 @@ PHASE_COMMANDS = {
     "ui_design": "/sfk-ui",
     "system_design": "/sfk-design",
     "development": "/sfk-dev",
+    "code_review": "/sfk-code-review",
     "testing": "/sfk-test",
     "deployment": "/sfk-deploy",
 }
@@ -45,7 +47,8 @@ PHASE_DEPENDENCIES = {
     "ui_design": {"hard": [], "soft": ["requirement"]},
     "system_design": {"hard": ["requirement"], "soft": []},
     "development": {"hard": ["requirement", "system_design"], "soft": ["ui_design"]},
-    "testing": {"hard": ["requirement"], "soft": ["development", "system_design"]},
+    "code_review": {"hard": ["requirement", "system_design", "development"], "soft": ["ui_design"]},
+    "testing": {"hard": ["requirement"], "soft": ["development", "system_design", "code_review"]},
     "deployment": {"hard": [], "soft": ["testing", "system_design"]},
 }
 DEFAULT_CONFIG = {
@@ -233,6 +236,40 @@ TESTING_BRACKET_PLACEHOLDER_RE = re.compile(
     r"执行命令|手工步骤|执行状态|结果|证据|执行人|缺陷|风险|影响|建议|"
     r"通过/不通过/未执行|部署准入|上线验证|回滚|是/否|动作)[^\]]*\]"
 )
+CODE_REVIEW_REQUIRED_SECTIONS = [
+    "文档信息",
+    "审查目标与范围",
+    "审查依据",
+    "实现审批状态",
+    "代码变更范围",
+    "审查方法与证据",
+    "审查清单",
+    "问题列表",
+    "问题处理策略",
+    "审查结论",
+    "修复回流与再审要求",
+    "下游影响分析",
+    "变更记录",
+]
+CODE_REVIEW_TEMPLATE_FIELDS = {
+    "displayName",
+    "moduleId",
+    "version",
+    "quality",
+    "createdAt",
+    "updatedAt",
+    "owner",
+}
+CODE_REVIEW_OUTCOMES = {"pass", "pass_with_risks", "changes_required", "blocked"}
+CODE_REVIEW_ISSUE_STATUSES = {"Open", "Fixed", "Verified", "Deferred", "Accepted", "Rejected"}
+CODE_REVIEW_BRACKET_PLACEHOLDER_RE = re.compile(
+    r"\[(?:说明|引用|列出|全新项目|已有业务文档|已有代码|已有 UI 代码|"
+    r"审查目标|审查范围|不审查范围|需求文档路径|系统设计文档路径|开发文档路径|关键结论|"
+    r"是/否|证据|implementationApproval 证据|路径|新增/修改/删除/配置/测试|审查重点|风险|"
+    r"已执行/未执行/不适用|文件、片段或说明|通过/有风险/不通过/不适用|"
+    r"CR-001|Blocker/Critical/Major/Minor/Info|问题描述|影响|建议处理|"
+    r"pass/pass_with_risks/changes_required/blocked|条件|原因|动作|负责人|待确认问题|建议)[^\]]*\]"
+)
 DEPLOYMENT_REQUIRED_SECTIONS = [
     "文档信息",
     "部署目标与范围",
@@ -269,7 +306,7 @@ DEPLOYMENT_BRACKET_PLACEHOLDER_RE = re.compile(
     r"健康检查|上线验证|监控|日志|告警|回滚|恢复|RTO|RPO|权限|合规|值守|通知|"
     r"待确认问题|影响|建议|是/否|动作|通过/不通过/未确认)[^\]]*\]"
 )
-QUALITY_CHECK_PHASES = {"requirement", "system_design", "development", "testing", "deployment"}
+QUALITY_CHECK_PHASES = {"requirement", "system_design", "development", "code_review", "testing", "deployment"}
 
 
 class SfkError(Exception):
@@ -659,6 +696,111 @@ def validate_testing_document(file_path: str, confirmed: bool) -> dict[str, list
     return {"errors": errors, "warnings": warnings}
 
 
+def detect_code_review_placeholders(text: str) -> list[str]:
+    placeholders: list[str] = []
+    seen: set[str] = set()
+    for line_number, line in enumerate(text.splitlines(), start=1):
+        for match in re.finditer(r"\{([A-Za-z][A-Za-z0-9_]*)\}", line):
+            if match.group(1) not in CODE_REVIEW_TEMPLATE_FIELDS:
+                continue
+            item = f"第 {line_number} 行：{match.group(0)}"
+            if item not in seen:
+                placeholders.append(item)
+                seen.add(item)
+        for match in CODE_REVIEW_BRACKET_PLACEHOLDER_RE.finditer(line):
+            item = f"第 {line_number} 行：{match.group(0)}"
+            if item not in seen:
+                placeholders.append(item)
+                seen.add(item)
+    return placeholders
+
+
+def extract_code_review_outcome(text: str) -> str | None:
+    for line in text.splitlines():
+        if not line.startswith("|") or "审查结果" not in line or "---" in line:
+            continue
+        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        if len(cells) < 2 or cells[0] != "审查结果":
+            continue
+        return cells[1]
+    return None
+
+
+def extract_code_review_issue_statuses(text: str) -> list[tuple[int, str]]:
+    statuses: list[tuple[int, str]] = []
+    in_issues = False
+    status_index: int | None = None
+    for line_number, line in enumerate(text.splitlines(), start=1):
+        title_match = re.match(r"^##\s+(.+?)\s*$", line)
+        if title_match:
+            title = normalize_heading_title(title_match.group(1))
+            in_issues = title == "问题列表"
+            status_index = None
+            continue
+        if not in_issues or not line.startswith("|"):
+            continue
+        if "---" in line:
+            continue
+        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        if not cells:
+            continue
+        if "状态" in cells:
+            status_index = cells.index("状态")
+            continue
+        if status_index is None or len(cells) <= status_index:
+            continue
+        status = cells[status_index]
+        if status and status not in {"状态", "-"}:
+            statuses.append((line_number, status))
+    return statuses
+
+
+def validate_code_review_document(file_path: str, confirmed: bool) -> dict[str, list[str]]:
+    path = root() / file_path
+    errors: list[str] = []
+    warnings: list[str] = []
+    if not path.exists() or not path.is_file():
+        errors.append(f"代码审查文档不存在：{file_path}")
+        return {"errors": errors, "warnings": warnings}
+    if path.stat().st_size <= 0:
+        errors.append(f"代码审查文档为空：{file_path}")
+        return {"errors": errors, "warnings": warnings}
+    if path.suffix.lower() != ".md":
+        errors.append(f"代码审查文档必须是 Markdown 文件：{file_path}")
+        return {"errors": errors, "warnings": warnings}
+
+    text = path.read_text(encoding="utf-8")
+    titles = set(markdown_h2_titles(text))
+    missing_sections = [section for section in CODE_REVIEW_REQUIRED_SECTIONS if section not in titles]
+    if missing_sections:
+        errors.append("代码审查文档缺少必备章节：" + "、".join(missing_sections))
+
+    placeholders = detect_code_review_placeholders(text)
+    if placeholders:
+        message = "代码审查文档仍包含模板占位符：" + "；".join(placeholders[:10])
+        if len(placeholders) > 10:
+            message += f"；另有 {len(placeholders) - 10} 处"
+        if confirmed:
+            errors.append(message)
+        else:
+            warnings.append(message)
+
+    outcome = extract_code_review_outcome(text)
+    if confirmed:
+        if not outcome:
+            errors.append("代码审查文档必须在“审查结论”中通过表格行填写审查结果。")
+        elif outcome not in CODE_REVIEW_OUTCOMES:
+            errors.append("代码审查文档审查结果不合法：" + outcome + "；允许值：" + "、".join(sorted(CODE_REVIEW_OUTCOMES)))
+        invalid_statuses = [
+            f"第 {line_number} 行：{status}"
+            for line_number, status in extract_code_review_issue_statuses(text)
+            if status not in CODE_REVIEW_ISSUE_STATUSES
+        ]
+        if invalid_statuses:
+            errors.append("代码审查文档问题状态不合法：" + "；".join(invalid_statuses[:10]) + "；允许值：" + "、".join(sorted(CODE_REVIEW_ISSUE_STATUSES)))
+    return {"errors": errors, "warnings": warnings}
+
+
 def detect_deployment_placeholders(text: str) -> list[str]:
     placeholders: list[str] = []
     seen: set[str] = set()
@@ -717,6 +859,8 @@ def validate_artifact_quality_document(phase: str, file_path: str, confirmed: bo
         return validate_system_design_document(file_path, confirmed)
     if phase == "development":
         return validate_development_document(file_path, confirmed)
+    if phase == "code_review":
+        return validate_code_review_document(file_path, confirmed)
     if phase == "testing":
         return validate_testing_document(file_path, confirmed)
     if phase == "deployment":
@@ -1164,12 +1308,45 @@ def implementation_approval_status(state: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def code_review_readiness_report(state: dict[str, Any]) -> dict[str, Any]:
+    dependency_result = check_phase_dependencies(state, "code_review")
+    approval_status = implementation_approval_status(state)
+    blockers = [
+        f"{item['phaseName']}({item['phase']}): {item['reason']}"
+        for item in dependency_result["hardMissing"]
+    ]
+    if not approval_status["canImplement"]:
+        blockers.append(f"源码实现二次确认未满足：{approval_status['reason']}")
+    can_review = not blockers
+    return {
+        "phase": "code_review",
+        "phaseName": PHASE_NAMES["code_review"],
+        "canReview": can_review,
+        "blocked": not can_review,
+        "dependencies": dependency_result,
+        "implementation": approval_status,
+        "blockers": blockers,
+        "message": "代码审查准入检查通过。" if can_review else "代码审查准入检查未通过，请先补齐硬依赖并完成源码实现二次确认。",
+    }
+
+
+def enforce_code_review_readiness(state: dict[str, Any]) -> None:
+    result = code_review_readiness_report(state)
+    if result["canReview"]:
+        return
+    details = "；".join(result["blockers"])
+    raise SfkError(
+        "代码审查准入未满足，不能更新代码审查产出物："
+        + details
+        + "。请先执行：python scripts/sfk.py implementation current development；"
+        + "必要时执行：python scripts/sfk.py implementation approve development --summary \"<本次实现范围摘要>\"。"
+    )
 def downstream_phases(phase: str) -> list[str]:
     validate_phase(phase)
     phase_ids = [phase_id for phase_id, _ in PHASES]
     index = phase_ids.index(phase)
     if phase == "ui_design":
-        candidates = ["development", "testing"]
+        candidates = ["development", "code_review", "testing"]
         return [item for item in phase_ids[index + 1:] if item in candidates]
     return phase_ids[index + 1:]
 
@@ -1192,7 +1369,9 @@ def artifact_impact_report(state: dict[str, Any], phase: str) -> dict[str, Any]:
             elif phase == "system_design":
                 reason = "系统设计变更可能影响开发实现、API / 接口设计、数据库设计、测试覆盖、部署配置、监控和回滚策略。"
             elif phase == "development":
-                reason = "开发文档变更可能影响测试覆盖、测试用例、部署配置、数据迁移、监控和回滚策略。"
+                reason = "开发文档变更可能影响代码审查结论、问题修复回流、测试覆盖、部署配置、数据迁移、监控和回滚策略。"
+            elif phase == "code_review":
+                reason = "代码审查结论或问题状态变更可能影响测试覆盖、缺陷验证、部署风险判断和上线准入说明。"
             elif phase == "testing":
                 reason = "测试文档变更可能影响部署准入、发布风险判断、回归范围、上线验证和回滚策略。"
             else:
@@ -1443,6 +1622,7 @@ def next_step_suggestion(state: dict[str, Any]) -> str:
     ui_design = artifacts.get("ui_design", {})
     system_design = artifacts.get("system_design", {})
     development = artifacts.get("development", {})
+    code_review = artifacts.get("code_review", {})
     testing = artifacts.get("testing", {})
     deployment = artifacts.get("deployment", {})
     if artifact_is_satisfied(deployment):
@@ -1457,11 +1637,15 @@ def next_step_suggestion(state: dict[str, Any]) -> str:
         if artifact_is_satisfied(development):
             approval_status = implementation_approval_status(state)
             if approval_status["canImplement"]:
-                if artifact_is_satisfied(testing):
-                    return "💡 下一步建议：测试文档已确认，可继续进入 /sfk-deploy；部署前会检查所有模块测试产出物是否已确认且可用。"
-                if testing.get("status") == "in_progress" or testing.get("quality") == "draft":
-                    return "💡 下一步建议：继续使用 /sfk-test 完善并确认测试文档草稿。"
-                return "💡 下一步建议：源码实现已获授权，可按开发文档完成实现后进入 /sfk-test。"
+                if artifact_is_satisfied(code_review):
+                    if artifact_is_satisfied(testing):
+                        return "💡 下一步建议：测试文档已确认，可继续进入 /sfk-deploy；部署前会检查所有模块测试产出物是否已确认且可用。"
+                    if testing.get("status") == "in_progress" or testing.get("quality") == "draft":
+                        return "💡 下一步建议：继续使用 /sfk-test 完善并确认测试文档草稿。"
+                    return "💡 下一步建议：代码审查文档已确认，可继续进入 /sfk-test，并将审查风险纳入测试覆盖。"
+                if code_review.get("status") == "in_progress" or code_review.get("quality") == "draft":
+                    return "💡 下一步建议：继续使用 /sfk-code-review 完善并确认代码审查文档草稿。"
+                return "💡 下一步建议：源码实现已获授权，可按开发文档完成实现后进入 /sfk-code-review。"
             if approval_status["reason"] == "implementation_approval_stale":
                 return "💡 下一步建议：开发文档已更新，请使用 /sfk-dev 重新进行源码实现二次确认。"
             return "💡 下一步建议：使用 /sfk-dev 进行源码实现二次确认；开发文档 confirmed 不代表已授权修改源码。"
@@ -1575,6 +1759,8 @@ def artifact_update(args: argparse.Namespace, confirmed: bool) -> None:
     phase = args.phase
     validate_phase(phase)
     enforce_hard_dependencies(state, phase)
+    if phase == "code_review":
+        enforce_code_review_readiness(state)
     artifact = state.setdefault("artifacts", {}).setdefault(phase, {})
     timestamp = now_iso()
     quality_warnings: list[str] = []
@@ -1677,6 +1863,13 @@ def artifact_impact(args: argparse.Namespace) -> None:
 def deployment_readiness(_: argparse.Namespace) -> None:
     index = require_index()
     result = deployment_readiness_report(index)
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+def code_review_readiness(_: argparse.Namespace) -> None:
+    _, state, module_id = require_current_state()
+    result = code_review_readiness_report(state)
+    result["moduleId"] = module_id
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 
@@ -1819,6 +2012,11 @@ def build_parser() -> argparse.ArgumentParser:
     deployment_sub = p_deployment.add_subparsers(dest="deployment_command", required=True)
     p_deployment_readiness = deployment_sub.add_parser("readiness")
     p_deployment_readiness.set_defaults(func=deployment_readiness)
+
+    p_code_review = sub.add_parser("code-review")
+    code_review_sub = p_code_review.add_subparsers(dest="code_review_command", required=True)
+    p_code_review_readiness = code_review_sub.add_parser("readiness")
+    p_code_review_readiness.set_defaults(func=code_review_readiness)
 
     p_impl = sub.add_parser("implementation")
     impl_sub = p_impl.add_subparsers(dest="implementation_command", required=True)

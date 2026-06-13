@@ -18,6 +18,7 @@ REQ_DOC = f"docs/super-flow-kit/{MODULE_ID}/20260610120000-{MODULE_ID}-需求分
 UI_DOC = f"docs/super-flow-kit/{MODULE_ID}/20260610123000-{MODULE_ID}-UI设计.md"
 SYS_DOC = f"docs/super-flow-kit/{MODULE_ID}/20260610130000-{MODULE_ID}-系统设计.md"
 DEV_DOC = f"docs/super-flow-kit/{MODULE_ID}/20260610133000-{MODULE_ID}-开发文档.md"
+CODE_REVIEW_DOC = f"docs/super-flow-kit/{MODULE_ID}/20260610143000-{MODULE_ID}-代码审查.md"
 TEST_DOC = f"docs/super-flow-kit/{MODULE_ID}/20260610140000-{MODULE_ID}-测试文档.md"
 DEPLOY_DOC = f"docs/super-flow-kit/{MODULE_ID}/20260610150000-{MODULE_ID}-部署文档.md"
 
@@ -239,6 +240,62 @@ def write_development_doc(project_dir: Path, rel_path: str = DEV_DOC) -> Path:
     return path
 
 
+def write_code_review_doc(
+    project_dir: Path,
+    rel_path: str = CODE_REVIEW_DOC,
+    outcome: str = "pass",
+    issue_status: str = "Open",
+    placeholder: bool = False,
+) -> Path:
+    path = project_dir / rel_path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    scope = "[说明本次代码审查的目标。]" if placeholder else "审查用户登录实现是否覆盖需求、符合系统设计并具备进入测试条件。"
+    path.write_text(
+        "# 用户管理代码审查文档\n\n"
+        "## 4. 文档信息\n\n"
+        "| 字段 | 值 |\n"
+        "| --- | --- |\n"
+        "| 模块 | 用户管理 |\n"
+        "| 质量状态 | pending |\n\n"
+        "## 9. 审查目标与范围\n\n"
+        f"{scope}\n\n"
+        "## 3. 审查依据\n\n"
+        "需求、系统设计和开发文档均已确认，作为本次代码审查依据。\n\n"
+        "## 5. 实现审批状态\n\n"
+        "源码实现二次确认已批准，授权摘要用于限定审查范围。\n\n"
+        "## 6. 代码变更范围\n\n"
+        "| 文件 / 目录 | 变更类型 | 审查重点 | 风险 |\n"
+        "| --- | --- | --- | --- |\n"
+        "| src/auth/login.py | 修改 | 登录流程、错误处理和安全校验 | 凭证校验错误 |\n\n"
+        "## 7. 审查方法与证据\n\n"
+        "通过静态阅读、需求覆盖检查和设计一致性检查进行审查。\n\n"
+        "## 8. 审查清单\n\n"
+        "| 类别 | 检查项 | 结论 | 说明 |\n"
+        "| --- | --- | --- | --- |\n"
+        "| 需求一致性 | 实现是否覆盖确认需求 | 通过 | 登录主流程已覆盖 |\n\n"
+        "## 10. 问题列表\n\n"
+        "| 编号 | 严重级别 | 问题描述 | 文件 / 位置 | 影响 | 建议处理 | 状态 |\n"
+        "| --- | --- | --- | --- | --- | --- | --- |\n"
+        f"| CR-001 | Minor | 登录失败提示需要测试重点覆盖 | src/auth/login.py | 用户体验 | 在测试阶段覆盖 | {issue_status} |\n\n"
+        "## 11. 问题处理策略\n\n"
+        "Open 回流 /sfk-dev；Fixed 需要重新 /sfk-code-review；Verified 可进入后续阶段；Deferred 和 Accepted 需要记录风险；Rejected 需要记录依据。\n\n"
+        "## 12. 审查结论\n\n"
+        "| 结论项 | 内容 |\n"
+        "| --- | --- |\n"
+        f"| 审查结果 | {outcome} |\n"
+        "| 结论摘要 | 当前审查结论已记录，后续按问题状态处理。 |\n\n"
+        "## 13. 修复回流与再审要求\n\n"
+        "代码审查阶段不得直接修改业务源码；changes_required 或 blocked 必须回到 /sfk-dev，重新授权后复审。\n\n"
+        "## 14. 下游影响分析\n\n"
+        "代码审查结论会影响测试覆盖和部署风险判断。\n\n"
+        "## 1. 变更记录\n\n"
+        "| 时间 | 变更 | 负责人 |\n"
+        "| --- | --- | --- |\n"
+        "| 2026-06-10 | 创建代码审查草稿 | 待确认 |\n",
+        encoding="utf-8",
+    )
+    return path
+
 def write_testing_doc(project_dir: Path, rel_path: str = TEST_DOC) -> Path:
     path = project_dir / rel_path
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -376,6 +433,14 @@ class SfkCliTests(unittest.TestCase):
             self.assertEqual(index["modules"][MODULE_ID]["docsPath"], f"docs/super-flow-kit/{MODULE_ID}/")
             self.assertEqual(index["globalConfig"]["pluginName"], "flow")
             self.assertEqual(index["globalConfig"]["userName"], "阿杰")
+
+            state = self.module_state(project_dir)
+            self.assertIn("code_review", state["artifacts"])
+            code_review = state["artifacts"]["code_review"]
+            self.assertEqual(code_review["status"], "pending")
+            self.assertIsNone(code_review["quality"])
+            self.assertEqual(code_review["files"], [])
+            self.assertNotIn("implementationApproval", code_review)
 
             payload = json.loads(current.stdout)
             self.assertEqual(payload["moduleId"], MODULE_ID)
@@ -1088,6 +1153,212 @@ class SfkCliTests(unittest.TestCase):
             confirmed = run_sfk(project_dir, "artifact", "confirm", "development", env=git_env)
             self.assertIn("qualityCheck：passed", confirmed.stdout)
 
+    def test_code_review_artifact_requires_dependencies_and_implementation_approval(self) -> None:
+        git_env = {
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "user.name",
+            "GIT_CONFIG_VALUE_0": "Test Owner",
+        }
+        with self.make_project() as tmp:
+            project_dir = Path(tmp)
+            self.init_project(project_dir)
+            self.create_module(project_dir)
+            write_code_review_doc(project_dir)
+
+            missing = run_sfk(project_dir, "artifact", "draft", "code_review", CODE_REVIEW_DOC, check=False)
+            self.assertNotEqual(missing.returncode, 0)
+            self.assertIn("硬依赖未满足", missing.stderr)
+            self.assertIn("requirement", missing.stderr)
+
+            write_requirement_doc(project_dir)
+            run_sfk(project_dir, "artifact", "draft", "requirement", REQ_DOC)
+            run_sfk(project_dir, "artifact", "confirm", "requirement", env=git_env)
+            write_system_design_doc(project_dir)
+            run_sfk(project_dir, "artifact", "draft", "system_design", SYS_DOC)
+            run_sfk(project_dir, "artifact", "confirm", "system_design", env=git_env)
+            write_development_doc(project_dir)
+            run_sfk(project_dir, "artifact", "draft", "development", DEV_DOC)
+            run_sfk(project_dir, "artifact", "confirm", "development", env=git_env)
+
+            phase = run_sfk(project_dir, "phase", "check", "code_review")
+            payload = json.loads(phase.stdout)
+            self.assertFalse(payload["blocked"])
+            self.assertEqual(payload["hardMissing"], [])
+
+            readiness = run_sfk(project_dir, "code-review", "readiness")
+            readiness_payload = json.loads(readiness.stdout)
+            self.assertFalse(readiness_payload["canReview"])
+            self.assertEqual(readiness_payload["implementation"]["reason"], "implementation_approval_pending")
+
+            blocked = run_sfk(project_dir, "artifact", "draft", "code_review", CODE_REVIEW_DOC, check=False)
+            self.assertNotEqual(blocked.returncode, 0)
+            self.assertIn("代码审查准入未满足", blocked.stderr)
+            self.assertIn("implementation approve development", blocked.stderr)
+            artifact = self.module_state(project_dir)["artifacts"]["code_review"]
+            self.assertEqual(artifact["status"], "pending")
+            self.assertEqual(artifact["files"], [])
+
+    def test_code_review_artifact_reuses_generic_draft_confirm_flow(self) -> None:
+        git_env = {
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "user.name",
+            "GIT_CONFIG_VALUE_0": "Test Owner",
+        }
+        with self.make_project() as tmp:
+            project_dir = Path(tmp)
+            self.init_project(project_dir)
+            self.create_module(project_dir)
+            write_requirement_doc(project_dir)
+            run_sfk(project_dir, "artifact", "draft", "requirement", REQ_DOC)
+            run_sfk(project_dir, "artifact", "confirm", "requirement", env=git_env)
+            write_system_design_doc(project_dir)
+            run_sfk(project_dir, "artifact", "draft", "system_design", SYS_DOC)
+            run_sfk(project_dir, "artifact", "confirm", "system_design", env=git_env)
+            write_development_doc(project_dir)
+            run_sfk(project_dir, "artifact", "draft", "development", DEV_DOC)
+            run_sfk(project_dir, "artifact", "confirm", "development", env=git_env)
+            run_sfk(project_dir, "implementation", "approve", "development", "--summary", "实现登录接口", env=git_env)
+            doc_path = write_code_review_doc(project_dir, issue_status="Verified")
+
+            readiness = run_sfk(project_dir, "code-review", "readiness")
+            readiness_payload = json.loads(readiness.stdout)
+            self.assertTrue(readiness_payload["canReview"])
+
+            draft = run_sfk(project_dir, "artifact", "draft", "code_review", CODE_REVIEW_DOC)
+            self.assertIn("qualityCheck：passed", draft.stdout)
+            state = self.module_state(project_dir)
+            artifact = state["artifacts"]["code_review"]
+            self.assertEqual(artifact["status"], "in_progress")
+            self.assertEqual(artifact["quality"], "draft")
+            self.assertEqual(artifact["files"][-1], CODE_REVIEW_DOC)
+            self.assertNotIn("implementationApproval", artifact)
+
+            text = doc_path.read_text(encoding="utf-8")
+            self.assertIn("## 1. 文档信息", text)
+            self.assertIn("| 质量状态 | draft |", text)
+
+            confirmed = run_sfk(project_dir, "artifact", "confirm", "code_review", env=git_env)
+            self.assertIn("qualityCheck：passed", confirmed.stdout)
+            state = self.module_state(project_dir)
+            artifact = state["artifacts"]["code_review"]
+            self.assertEqual(artifact["status"], "done")
+            self.assertEqual(artifact["quality"], "confirmed")
+            self.assertEqual(artifact["owner"], "Test Owner")
+            self.assertTrue(artifact["confirmedAt"])
+
+            text = doc_path.read_text(encoding="utf-8")
+            self.assertIn("| 质量状态 | confirmed |", text)
+            self.assertIn("| 2026-06-10 | 创建代码审查草稿 | Test Owner |", text)
+
+    def test_code_review_draft_blocks_when_development_approval_is_reset(self) -> None:
+        git_env = {
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "user.name",
+            "GIT_CONFIG_VALUE_0": "Test Owner",
+        }
+        with self.make_project() as tmp:
+            project_dir = Path(tmp)
+            self.init_project(project_dir)
+            self.create_module(project_dir)
+            write_requirement_doc(project_dir)
+            run_sfk(project_dir, "artifact", "draft", "requirement", REQ_DOC)
+            run_sfk(project_dir, "artifact", "confirm", "requirement", env=git_env)
+            write_system_design_doc(project_dir)
+            run_sfk(project_dir, "artifact", "draft", "system_design", SYS_DOC)
+            run_sfk(project_dir, "artifact", "confirm", "system_design", env=git_env)
+            write_development_doc(project_dir)
+            run_sfk(project_dir, "artifact", "draft", "development", DEV_DOC)
+            run_sfk(project_dir, "artifact", "confirm", "development", env=git_env)
+            run_sfk(project_dir, "implementation", "approve", "development", "--summary", "实现登录接口", env=git_env)
+            run_sfk(project_dir, "artifact", "draft", "development", DEV_DOC)
+            write_code_review_doc(project_dir)
+
+            result = run_sfk(project_dir, "artifact", "draft", "code_review", CODE_REVIEW_DOC, check=False)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("硬依赖未满足", result.stderr)
+            self.assertIn("development", result.stderr)
+
+    def test_code_review_artifact_requires_required_sections(self) -> None:
+        git_env = {
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "user.name",
+            "GIT_CONFIG_VALUE_0": "Test Owner",
+        }
+        with self.make_project() as tmp:
+            project_dir = Path(tmp)
+            self.init_project(project_dir)
+            self.create_module(project_dir)
+            write_requirement_doc(project_dir)
+            run_sfk(project_dir, "artifact", "draft", "requirement", REQ_DOC)
+            run_sfk(project_dir, "artifact", "confirm", "requirement", env=git_env)
+            write_system_design_doc(project_dir)
+            run_sfk(project_dir, "artifact", "draft", "system_design", SYS_DOC)
+            run_sfk(project_dir, "artifact", "confirm", "system_design", env=git_env)
+            write_development_doc(project_dir)
+            run_sfk(project_dir, "artifact", "draft", "development", DEV_DOC)
+            run_sfk(project_dir, "artifact", "confirm", "development", env=git_env)
+            run_sfk(project_dir, "implementation", "approve", "development", "--summary", "实现登录接口", env=git_env)
+            doc_path = project_dir / CODE_REVIEW_DOC
+            doc_path.parent.mkdir(parents=True, exist_ok=True)
+            doc_path.write_text(
+                "# 用户管理代码审查文档\n\n"
+                "## 文档信息\n\n"
+                "| 质量状态 | pending |\n\n"
+                "## 审查目标与范围\n\n"
+                "只包含目标，缺少其他必备章节。\n",
+                encoding="utf-8",
+            )
+
+            result = run_sfk(project_dir, "artifact", "draft", "code_review", CODE_REVIEW_DOC, check=False)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("代码审查文档质量检查未通过", result.stderr)
+            self.assertIn("缺少必备章节", result.stderr)
+            self.assertIn("审查结论", result.stderr)
+
+    def test_code_review_placeholder_and_value_validation(self) -> None:
+        git_env = {
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "user.name",
+            "GIT_CONFIG_VALUE_0": "Test Owner",
+        }
+        with self.make_project() as tmp:
+            project_dir = Path(tmp)
+            self.init_project(project_dir)
+            self.create_module(project_dir)
+            write_requirement_doc(project_dir)
+            run_sfk(project_dir, "artifact", "draft", "requirement", REQ_DOC)
+            run_sfk(project_dir, "artifact", "confirm", "requirement", env=git_env)
+            write_system_design_doc(project_dir)
+            run_sfk(project_dir, "artifact", "draft", "system_design", SYS_DOC)
+            run_sfk(project_dir, "artifact", "confirm", "system_design", env=git_env)
+            write_development_doc(project_dir)
+            run_sfk(project_dir, "artifact", "draft", "development", DEV_DOC)
+            run_sfk(project_dir, "artifact", "confirm", "development", env=git_env)
+            run_sfk(project_dir, "implementation", "approve", "development", "--summary", "实现登录接口", env=git_env)
+
+            doc_path = write_code_review_doc(project_dir, placeholder=True)
+            draft = run_sfk(project_dir, "artifact", "draft", "code_review", CODE_REVIEW_DOC)
+            self.assertIn("qualityCheck：warnings", draft.stdout)
+            self.assertIn("模板占位符", draft.stdout)
+            confirm = run_sfk(project_dir, "artifact", "confirm", "code_review", check=False)
+            self.assertNotEqual(confirm.returncode, 0)
+            self.assertIn("模板占位符", confirm.stderr)
+
+            doc_path.write_text(doc_path.read_text(encoding="utf-8").replace("[说明本次代码审查的目标。]", "审查用户登录实现是否覆盖需求。"), encoding="utf-8")
+            invalid_outcome = doc_path.read_text(encoding="utf-8").replace("| 审查结果 | pass |", "| 审查结果 | approved |")
+            doc_path.write_text(invalid_outcome, encoding="utf-8")
+            invalid = run_sfk(project_dir, "artifact", "confirm", "code_review", check=False)
+            self.assertNotEqual(invalid.returncode, 0)
+            self.assertIn("审查结果不合法", invalid.stderr)
+            self.assertIn("changes_required", invalid.stderr)
+
+            doc_path.write_text(invalid_outcome.replace("| 审查结果 | approved |", "| 审查结果 | changes_required |"), encoding="utf-8")
+            text = doc_path.read_text(encoding="utf-8").replace("| CR-001 | Minor | 登录失败提示需要测试重点覆盖 | src/auth/login.py | 用户体验 | 在测试阶段覆盖 | Open |", "| CR-001 | Minor | 登录失败提示需要测试重点覆盖 | src/auth/login.py | 用户体验 | 在测试阶段覆盖 | Todo |")
+            doc_path.write_text(text, encoding="utf-8")
+            invalid_status = run_sfk(project_dir, "artifact", "confirm", "code_review", check=False)
+            self.assertNotEqual(invalid_status.returncode, 0)
+            self.assertIn("问题状态不合法", invalid_status.stderr)
+            self.assertIn("Verified", invalid_status.stderr)
     def test_testing_artifact_enforces_hard_requirement_dependency(self) -> None:
         with self.make_project() as tmp:
             project_dir = Path(tmp)
@@ -1122,7 +1393,7 @@ class SfkCliTests(unittest.TestCase):
             self.assertFalse(payload["blocked"])
             self.assertTrue(payload["canContinue"])
             self.assertEqual(payload["hardMissing"], [])
-            self.assertEqual({item["phase"] for item in payload["softMissing"]}, {"development", "system_design"})
+            self.assertEqual({item["phase"] for item in payload["softMissing"]}, {"development", "system_design", "code_review"})
 
     def test_testing_artifact_reuses_generic_draft_confirm_flow(self) -> None:
         git_env = {
@@ -1279,9 +1550,18 @@ class SfkCliTests(unittest.TestCase):
 
             run_sfk(project_dir, "implementation", "approve", "development", "--summary", "实现用户管理开发计划", env=git_env)
             status = run_sfk(project_dir, "status")
-            self.assertIn("/sfk-test", status.stdout)
+            self.assertIn("/sfk-code-review", status.stdout)
             self.assertIn("实现授权:approved", status.stdout)
             self.assertNotIn("/sfk-test（后续阶段预留，尚未完整实现）", status.stdout)
+
+            write_code_review_doc(project_dir, issue_status="Verified")
+            run_sfk(project_dir, "artifact", "draft", "code_review", CODE_REVIEW_DOC)
+            status = run_sfk(project_dir, "status")
+            self.assertIn("继续使用 /sfk-code-review", status.stdout)
+
+            run_sfk(project_dir, "artifact", "confirm", "code_review", env=git_env)
+            status = run_sfk(project_dir, "status")
+            self.assertIn("/sfk-test", status.stdout)
 
             write_testing_doc(project_dir)
             run_sfk(project_dir, "artifact", "draft", "testing", TEST_DOC)
@@ -1737,6 +2017,7 @@ class SfkCliTests(unittest.TestCase):
             REPO_ROOT / ".claude" / "commands" / "sfk-ui.md",
             REPO_ROOT / ".claude" / "commands" / "sfk-design.md",
             REPO_ROOT / ".claude" / "commands" / "sfk-dev.md",
+            REPO_ROOT / ".claude" / "commands" / "sfk-code-review.md",
             REPO_ROOT / ".claude" / "commands" / "sfk-test.md",
             REPO_ROOT / ".claude" / "commands" / "sfk-deploy.md",
         ]
@@ -1752,7 +2033,9 @@ class SfkCliTests(unittest.TestCase):
         dev_doc = (REPO_ROOT / ".claude" / "commands" / "sfk-dev.md").read_text(encoding="utf-8")
         self.assertIn("implementation approve development", dev_doc)
         self.assertIn("Gate C", dev_doc)
-        self.assertIn("Gate B 只确认开发文档", dev_doc)
+        code_review_doc = (REPO_ROOT / ".claude" / "commands" / "sfk-code-review.md").read_text(encoding="utf-8")
+        for item in ("Gate C", "pass", "pass_with_risks", "changes_required", "blocked", "Open", "Fixed", "Verified", "Deferred", "Accepted", "Rejected", "/sfk-dev", "implementation approve development"):
+            self.assertIn(item, code_review_doc)
 
 
 if __name__ == "__main__":

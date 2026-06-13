@@ -2,10 +2,10 @@
 
 `super-flow-kit` 是一个面向 Claude Code 的结构化软件交付工作流插件，目标是帮助用户从需求分析到部署上线，按阶段沉淀项目上下文、产出物和工作流状态。
 
-当前版本从 **v0.1 MVP** 继续演进，已覆盖需求分析、UI 设计、系统设计、开发计划、功能测试和部署上线闭环：
+当前版本从 **v0.1 MVP** 继续演进，已覆盖需求分析、UI 设计、系统设计、开发计划、代码审查、功能测试和部署上线闭环：
 
 ```text
-初始化项目 → 创建模块 → 需求分析 → UI 设计 → 系统设计 → 开发计划 → 功能测试 → 部署上线 → 保存产出物 → 查看状态看板
+初始化项目 → 创建模块 → 需求分析 → UI 设计 → 系统设计 → 开发计划 → 代码审查 → 功能测试 → 部署上线 → 保存产出物 → 查看状态看板
 ```
 
 ## 当前状态
@@ -59,23 +59,28 @@ v0.6 部署上线阶段已实现：
 - 部署阶段将测试作为软依赖处理，但 `/sfk-deploy` 前必须执行 `scripts/sfk.py deployment readiness`，检查所有模块是否存在已确认且可用的测试产出物，并向用户提示风险。
 - 脚本层会校验部署文档必备章节，确认前不得残留模板占位符；部署文档 confirmed 不代表真实部署已经执行，也不代表生产环境已经变更。
 
+v0.7 代码审查阶段已实现：
+
+- `/sfk-code-review` — 进入代码审查阶段，在需求、系统设计、开发文档确认且源码实现授权批准后生成或更新代码审查文档。
+- 代码审查文档记录 `pass`、`pass_with_risks`、`changes_required`、`blocked` 四类审查结果，以及 `Open`、`Fixed`、`Verified`、`Deferred`、`Accepted`、`Rejected` 六类问题状态。
+- 代码审查不直接修改业务源码；发现需修复问题时回流 `/sfk-dev`，重新通过源码实现二次确认后再复审。
+
 暂未完整实现：
 
 - `/sfk-export`
 - `/sfk-reset`
-- `/sfk-code-review`
 - 自然语言 hook 动态唤醒
 - 多人冲突自动合并
 
 ## 核心工作流
 
-完整产品规划包含六个阶段：
+完整产品规划包含七个阶段：
 
 ```text
-需求分析 → UI 设计 → 系统设计 → 软件开发 → 功能测试 → 部署上线
+需求分析 → UI 设计 → 系统设计 → 软件开发 → 代码审查 → 功能测试 → 部署上线
 ```
 
-v0.1 完整实现 **需求分析** 阶段；v0.2 以 `/sfk-ui` 形式实现 **UI 设计** 的窄范围切片；v0.3 以 `/sfk-design` 形式实现带脚本层兜底的 **系统设计** 闭环；v0.3.1 补强系统设计中的 **数据库设计** 和 **API / 接口设计**；v0.4 以 `/sfk-dev` 启动 **软件开发计划** 产出物闭环；v0.4.1 增加源码实现二次确认；v0.5 以 `/sfk-test` 实现 **功能测试** 产出物闭环；v0.6 以 `/sfk-deploy` 实现 **部署上线** 产出物闭环。
+v0.1 完整实现 **需求分析** 阶段；v0.2 以 `/sfk-ui` 形式实现 **UI 设计** 的窄范围切片；v0.3 以 `/sfk-design` 形式实现带脚本层兜底的 **系统设计** 闭环；v0.3.1 补强系统设计中的 **数据库设计** 和 **API / 接口设计**；v0.4 以 `/sfk-dev` 启动 **软件开发计划** 产出物闭环；v0.4.1 增加源码实现二次确认；v0.5 以 `/sfk-test` 实现 **功能测试** 产出物闭环；v0.6 以 `/sfk-deploy` 实现 **部署上线** 产出物闭环；v0.7 以 `/sfk-code-review` 实现 **代码审查** 产出物闭环。
 
 ## 推荐使用路径
 
@@ -92,6 +97,7 @@ v0.1 完整实现 **需求分析** 阶段；v0.2 以 `/sfk-ui` 形式实现 **UI
 /sfk-ui 设计用户登录界面
 /sfk-design 设计用户管理系统架构
 /sfk-dev 制定用户管理开发计划
+/sfk-code-review 审查用户管理实现
 /sfk-test 制定用户管理测试计划
 /sfk-deploy 制定用户管理部署计划
 ```
@@ -128,6 +134,7 @@ v0.1 完整实现 **需求分析** 阶段；v0.2 以 `/sfk-ui` 形式实现 **UI
     ├── sfk-ui.md
     ├── sfk-design.md
     ├── sfk-dev.md
+    ├── sfk-code-review.md
     ├── sfk-test.md
     └── sfk-deploy.md
 
@@ -147,6 +154,7 @@ templates/
 ├── ui-design.md
 ├── system-design.md
 ├── development.md
+├── code-review.md
 ├── testing.md
 └── deployment.md
 
@@ -174,6 +182,7 @@ docs/
         ├── yyyyMMddHHmmss-{moduleId}-UI设计.md
         ├── yyyyMMddHHmmss-{moduleId}-系统设计.md
         ├── yyyyMMddHHmmss-{moduleId}-开发文档.md
+        ├── yyyyMMddHHmmss-{moduleId}-代码审查.md
         ├── yyyyMMddHHmmss-{moduleId}-测试文档.md
         └── yyyyMMddHHmmss-{moduleId}-部署文档.md
 ```
@@ -211,24 +220,29 @@ python scripts/sfk.py context discover --phase requirement
 python scripts/sfk.py context discover --phase ui_design
 python scripts/sfk.py context discover --phase system_design
 python scripts/sfk.py context discover --phase development
+python scripts/sfk.py context discover --phase code_review
 python scripts/sfk.py context discover --phase testing
 python scripts/sfk.py context discover --phase deployment
 python scripts/sfk.py artifact impact requirement
 python scripts/sfk.py artifact impact system_design
 python scripts/sfk.py artifact impact development
+python scripts/sfk.py artifact impact code_review
 python scripts/sfk.py artifact impact testing
 python scripts/sfk.py phase check ui_design
 python scripts/sfk.py phase check system_design
 python scripts/sfk.py phase check development
+python scripts/sfk.py phase check code_review
 python scripts/sfk.py phase check testing
 python scripts/sfk.py phase check deployment
 python scripts/sfk.py deployment readiness
 python scripts/sfk.py artifact current system_design
 python scripts/sfk.py artifact current development
+python scripts/sfk.py artifact current code_review
 python scripts/sfk.py artifact current testing
 python scripts/sfk.py artifact current deployment
 python scripts/sfk.py implementation current development
 python scripts/sfk.py implementation approve development --summary "按已确认开发文档开始实现"
+python scripts/sfk.py code-review readiness
 python scripts/sfk.py tui select --title "选择方案" --mode single --option mvp="MVP 方案" --option full="完整方案"
 python scripts/sfk.py status
 ```
@@ -262,6 +276,9 @@ rm -rf .sfk docs/super-flow-kit
 - `/sfk-design` 草稿必须包含系统设计必备章节，尤其是数据库设计和 API / 接口设计；确认时不得残留模板占位符，否则脚本会拒绝更新为 `done/confirmed`。
 - `/sfk-dev` 草稿必须包含开发文档必备章节；确认时不得残留模板占位符。v0.4 的 `/sfk-dev` 只确认开发计划产出物，不代表业务代码已经实现。
 - `/sfk-dev` 源码实现前必须通过 `scripts/sfk.py implementation approve development --summary ...` 记录二次确认；`implementationApproval.status = approved` 只表示允许开始实现，不表示实现完成。
+- `/sfk-code-review` 草稿必须包含代码审查必备章节；确认时不得残留模板占位符，审查结果只能是 `pass`、`pass_with_risks`、`changes_required` 或 `blocked`。
+- `/sfk-code-review` 硬依赖已确认且可用的需求、系统设计和开发文档，并要求 `implementationApproval` 已批准且未过期；`scripts/sfk.py code-review readiness` 提供只读准入检查。
+- `/sfk-code-review` 只确认代码审查文档，不代表问题已修复，也不代表测试已通过；发现需修复问题时回流 `/sfk-dev`，源码修改仍需二次确认。
 - `/sfk-test` 草稿必须包含测试文档必备章节；确认时不得残留模板占位符。需求是硬依赖，系统设计和开发文档是软依赖，可带假设继续但必须记录依据不足。
 - `/sfk-test` 只确认测试文档，不代表所有测试已执行通过，也不代表部署已获准。
 - `/sfk-deploy` 草稿必须包含部署文档必备章节；确认时不得残留模板占位符。测试在部署阶段作为软依赖，但必须通过 `scripts/sfk.py deployment readiness` 检查所有模块是否有已确认且可用的测试产出物，并向用户提示风险。
