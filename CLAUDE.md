@@ -6,14 +6,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 此仓库正在实现 `super-flow-kit` Claude Code 工作流插件。当前权威规格文档是 `super-flow-kit.md`，`super-flow-kit-v3.1.md` 是 v3.1 草稿副本。
 
-v0.1 MVP 目标是实现最小闭环：初始化项目状态、创建/切换模块、查看看板、配置插件昵称和用户称呼，并通过 `/sfk-req` 引导生成需求分析文档。当前需求分析已具备脚本层质量门禁；v0.2 UI 设计窄范围切片已完成；v0.3 系统设计闭环已完成；v0.3.1 补强系统设计中的 API 设计和数据库设计；v0.4 已启动 `/sfk-dev` 基础开发阶段闭环，生成开发文档/开发计划；v0.4.1 增加源码实现二次确认门禁，开发文档确认不等于授权修改源码；v0.5 已实现 `/sfk-test` 功能测试阶段闭环，生成测试文档并增加脚本层质量门禁；v0.6 已实现 `/sfk-deploy` 部署上线阶段闭环，生成部署文档并在部署前检查所有模块测试产出物状态；v0.7 已实现 `/sfk-code-review` 代码审查阶段闭环，在实现授权后生成代码审查文档并记录问题处理回流策略；v0.8 已实现 `/sfk-export` 交付包导出能力，支持单模块和全项目合并交付包；v0.9 已实现 `/sfk-reset` 状态级重置能力，支持影响范围预览和严格二次确认，默认保留产出物文档和业务源码。
+v0.1 MVP 目标是实现最小闭环：初始化项目状态、创建/切换模块、查看看板、配置插件昵称和用户称呼，并通过 `/sfk-req` 引导生成需求分析文档。当前需求分析已具备脚本层质量门禁；v0.2 UI 设计窄范围切片已完成；v0.3 系统设计闭环已完成；v0.3.1 补强系统设计中的 API 设计和数据库设计；v0.4 已启动 `/sfk-dev` 基础开发阶段闭环，生成开发文档/开发计划；v0.4.1 增加源码实现二次确认门禁，开发文档确认不等于授权修改源码；v0.5 已实现 `/sfk-test` 功能测试阶段闭环，生成测试文档并增加脚本层质量门禁；v0.6 已实现 `/sfk-deploy` 部署上线阶段闭环，生成部署文档并在部署前检查所有模块测试产出物状态；v0.7 已实现 `/sfk-code-review` 代码审查阶段闭环，在实现授权后生成代码审查文档并记录问题处理回流策略；v0.8 已实现 `/sfk-export` 交付包导出能力，支持单模块和全项目合并交付包；v0.9 已实现 `/sfk-reset` 状态级重置能力，支持影响范围预览和严格二次确认，默认保留产出物文档和业务源码；`/sfk-help` 已实现只读指令帮助查询；自然语言 hook 动态唤醒已实现为只读增强能力，命中高置信意图时注入提示上下文但不执行 slash command。
 
 ## 当前实现结构
 
 ```text
 .claude/
+├── settings.json       # Claude Code UserPromptSubmit hook 配置
 └── commands/
     ├── sfk.md
+    ├── sfk-help.md
     ├── sfk-init.md
     ├── sfk-status.md
     ├── sfk-module.md
@@ -35,7 +37,8 @@ scripts/
 ├── sfk-status.sh       # 看板包装脚本
 ├── sfk-module.sh       # 模块管理包装脚本
 ├── sfk-config.sh       # 配置管理包装脚本
-└── sfk-reset.sh        # 状态重置包装脚本
+├── sfk-reset.sh        # 状态重置包装脚本
+└── sfk-wake.sh         # UserPromptSubmit 自然语言唤醒包装脚本
 
 tests/
 └── test_sfk_cli.py     # Python 标准库回归测试
@@ -81,6 +84,9 @@ python -m unittest discover -s tests -p "test_*.py"
 
 ```bash
 python scripts/sfk.py init
+python scripts/sfk.py help
+python scripts/sfk.py help sfk-status
+python scripts/sfk.py help 导出
 python scripts/sfk.py status
 python scripts/sfk.py module create 用户管理 --id user-management
 python scripts/sfk.py module list
@@ -122,6 +128,9 @@ python scripts/sfk.py export project
 python scripts/sfk.py export project --zip
 python scripts/sfk.py reset impact
 python scripts/sfk.py reset apply --confirm 确认重置
+python scripts/sfk.py wake --prompt "sfk 在吗"
+python scripts/sfk.py wake --prompt "帮我做需求分析"
+python scripts/sfk.py wake --prompt "项目中的审批工作流需要加一段说明"
 python scripts/sfk.py tui select --title "选择方案" --mode single --option mvp="MVP 方案" --option full="完整方案"
 python scripts/sfk.py status
 ```
@@ -130,6 +139,8 @@ Slash command 手动验证路径：
 
 ```text
 /sfk-init
+/sfk-help
+/sfk-help 导出
 /sfk-module create 用户管理
 /sfk-config set pluginName flow
 /sfk-config set userName 阿杰
@@ -150,6 +161,7 @@ Slash command 手动验证路径：
 ## 当前已实现能力
 
 - `/sfk` — 唤醒插件并展示状态。
+- `/sfk-help` — 只读查询 super-flow-kit 指令清单和指令说明，支持按命令名或关键词筛选，不要求项目初始化。
 - `/sfk-init` — 初始化 `.sfk/` 和 `docs/super-flow-kit/`。
 - `/sfk-status` — 查看项目和当前模块看板。
 - `/sfk-module create/list/switch/status` — 管理模块，`create` 在 slash command 交互中可智能推荐 `moduleId`，`--id` 可用于显式指定。
@@ -165,6 +177,7 @@ Slash command 手动验证路径：
 - `/sfk-deploy` — v0.6 部署上线阶段闭环：生成或更新部署文档/上线计划，复用通用 artifact draft/confirm 状态机；测试作为部署软依赖，但命令流程必须通过 `scripts/sfk.py deployment readiness` 检查所有模块测试产出物是否已确认且可用，并向用户提示风险。
 - `/sfk-export` — v0.8 交付包导出能力：支持 `export module [moduleId] [--zip]` 和 `export project [--zip]`，生成单模块或全项目合并交付包；导出写入 `docs/super-flow-kit/exports/`，不修改 `.sfk` 状态，不导出业务源码、配置或密钥。
 - `/sfk-reset` — v0.9 状态级重置能力：支持 `reset impact [--scope current-module|project]` 只读展示影响范围，以及 `reset apply --confirm 确认重置` 在严格二次确认后重置当前模块或全项目模块的工作流状态；默认保留 `docs/super-flow-kit/` 产出物文档、导出包和业务源码，只解除 `.sfk` 当前状态引用并追加 history。
+- 自然语言 hook 动态唤醒 — 通过 `.claude/settings.json` 的 `UserPromptSubmit` hook 调用 `scripts/sfk-wake.sh` / `scripts/sfk.py wake --hook-json`，读取 prompt 与 `globalConfig.pluginName/userName` 后只在高置信意图下向 Claude 注入只读提示上下文；不会执行 `/sfk-status` 或任何 `/sfk-*` 命令，不会创建或修改 `.sfk`、产出物文档或业务源码。
 - `scripts/sfk.py deployment readiness` — 只读全模块部署准入检查，扫描所有模块的 testing 产出物状态、质量和文件可用性；该检查只证明测试产出物已确认且可用，不代表所有功能实际测试通过。
 - `scripts/sfk.py code-review readiness` — 只读当前模块代码审查准入检查，汇总需求/系统设计/开发文档硬依赖和开发实现授权状态；该检查只证明可以生成代码审查产出物，不代表源码已通过审查。
 - `scripts/sfk.py artifact draft/confirm/current` — 为阶段命令提供草稿、确认和当前产出物读取能力；`draft/confirm` 会触发通用产出物文档检查。
@@ -175,7 +188,6 @@ Slash command 手动验证路径：
 
 ## 暂未完整实现能力
 
-- 自然语言 hook 动态唤醒。
 - 多人冲突自动合并。
 
 ## 产品架构要点

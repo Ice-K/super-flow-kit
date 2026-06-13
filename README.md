@@ -2,7 +2,7 @@
 
 `super-flow-kit` 是一个面向 Claude Code 的结构化软件交付工作流插件，目标是帮助用户从需求分析到部署上线，按阶段沉淀项目上下文、产出物和工作流状态。
 
-当前版本从 **v0.1 MVP** 继续演进，已覆盖需求分析、UI 设计、系统设计、开发计划、代码审查、功能测试、部署上线和交付包导出能力：
+当前版本从 **v0.1 MVP** 继续演进，已覆盖需求分析、UI 设计、系统设计、开发计划、代码审查、功能测试、部署上线、交付包导出、状态级重置和自然语言 hook 动态唤醒能力：
 
 ```text
 初始化项目 → 创建模块 → 需求分析 → UI 设计 → 系统设计 → 开发计划 → 代码审查 → 功能测试 → 部署上线 → 保存产出物 → 查看状态看板
@@ -13,6 +13,7 @@
 v0.1 已实现：
 
 - `/sfk` — 唤醒插件并展示当前状态。
+- `/sfk-help` — 查询 super-flow-kit 指令清单和指令说明，支持按命令名或关键词筛选。
 - `/sfk-init` — 初始化 `.sfk/` 状态目录和 `docs/super-flow-kit/` 产出物目录。
 - `/sfk-status` — 查看项目和当前模块工作流看板。
 - `/sfk-module create/list/switch/status` — 管理功能模块；`create` 在 slash command 交互中可智能推荐 `moduleId`，`--id` 可显式覆盖。
@@ -72,10 +73,28 @@ v0.8 交付包导出能力已实现：
 - `python scripts/sfk.py export project [--zip]` — 汇总所有模块为项目级交付包，可选生成 zip。
 - 导出写入 `docs/super-flow-kit/exports/`，不修改 `.sfk` 状态，不导出业务源码、配置或密钥。
 
+v0.9 状态级重置能力已实现：
+
+- `/sfk-reset` — 支持当前模块或全项目工作流状态重置。
+- `python scripts/sfk.py reset impact [--scope current-module|project]` — 只读展示影响范围。
+- `python scripts/sfk.py reset apply --confirm 确认重置` — 严格匹配确认语后才执行状态重置。
+- 默认保留 `docs/super-flow-kit/` 产出物文档、导出包和业务源码，只解除 `.sfk` 当前状态引用并追加 history。
+
+只读帮助查询已实现：
+
+- `/sfk-help` — 查询插件指令和说明，不要求项目初始化。
+- `python scripts/sfk.py help` — 列出全部指令。
+- `python scripts/sfk.py help <命令名|关键词>` — 按命令名或关键词筛选指令说明。
+
+自然语言 hook 动态唤醒已实现：
+
+- `.claude/settings.json` — 配置 Claude Code `UserPromptSubmit` hook，调用 `bash scripts/sfk-wake.sh`。
+- `scripts/sfk.py wake --prompt "..."` — 便于脚本级测试自然语言唤醒匹配。
+- `scripts/sfk.py wake --hook-json` — 从 hook stdin 读取 prompt，命中后输出只读 `additionalContext`。
+- hook 只做高置信提示，不执行 `/sfk-status` 或任何 `/sfk-*` 命令；普通业务语境如“审批工作流”“上传进度条”不会因通用词单独触发。
+
 暂未完整实现：
 
-- `/sfk-reset`
-- 自然语言 hook 动态唤醒
 - 多人冲突自动合并
 
 ## 核心工作流
@@ -86,7 +105,7 @@ v0.8 交付包导出能力已实现：
 需求分析 → UI 设计 → 系统设计 → 软件开发 → 代码审查 → 功能测试 → 部署上线
 ```
 
-v0.1 完整实现 **需求分析** 阶段；v0.2 以 `/sfk-ui` 形式实现 **UI 设计** 的窄范围切片；v0.3 以 `/sfk-design` 形式实现带脚本层兜底的 **系统设计** 闭环；v0.3.1 补强系统设计中的 **数据库设计** 和 **API / 接口设计**；v0.4 以 `/sfk-dev` 启动 **软件开发计划** 产出物闭环；v0.4.1 增加源码实现二次确认；v0.5 以 `/sfk-test` 实现 **功能测试** 产出物闭环；v0.6 以 `/sfk-deploy` 实现 **部署上线** 产出物闭环；v0.7 以 `/sfk-code-review` 实现 **代码审查** 产出物闭环。
+v0.1 完整实现 **需求分析** 阶段；v0.2 以 `/sfk-ui` 形式实现 **UI 设计** 的窄范围切片；v0.3 以 `/sfk-design` 形式实现带脚本层兜底的 **系统设计** 闭环；v0.3.1 补强系统设计中的 **数据库设计** 和 **API / 接口设计**；v0.4 以 `/sfk-dev` 启动 **软件开发计划** 产出物闭环；v0.4.1 增加源码实现二次确认；v0.5 以 `/sfk-test` 实现 **功能测试** 产出物闭环；v0.6 以 `/sfk-deploy` 实现 **部署上线** 产出物闭环；v0.7 以 `/sfk-code-review` 实现 **代码审查** 产出物闭环；v0.8 实现交付包导出；v0.9 实现状态级重置；自然语言 hook 动态唤醒作为只读增强能力提供高置信提示。
 
 ## 推荐使用路径
 
@@ -94,6 +113,8 @@ v0.1 完整实现 **需求分析** 阶段；v0.2 以 `/sfk-ui` 形式实现 **UI
 
 ```text
 /sfk-init
+/sfk-help
+/sfk-help 导出
 /sfk-module create 用户管理
 /sfk-config set pluginName flow
 /sfk-config set userName 阿杰
@@ -108,6 +129,7 @@ v0.1 完整实现 **需求分析** 阶段；v0.2 以 `/sfk-ui` 形式实现 **UI
 /sfk-deploy 制定用户管理部署计划
 /sfk-export module user-management --zip
 /sfk-export project --zip
+/sfk-reset current-module
 ```
 
 在 slash command 交互中，`/sfk-module create 用户管理` 会先由 Claude 根据语义推荐合法的 `moduleId`（如 `user-management`），再调用底层脚本；如无法可靠推荐，可使用 `--id` 显式指定。
@@ -132,8 +154,10 @@ v0.1 完整实现 **需求分析** 阶段；v0.2 以 `/sfk-ui` 形式实现 **UI
 
 ```text
 .claude/
+├── settings.json       # Claude Code UserPromptSubmit hook 配置
 └── commands/
     ├── sfk.md
+    ├── sfk-help.md
     ├── sfk-init.md
     ├── sfk-status.md
     ├── sfk-module.md
@@ -145,7 +169,8 @@ v0.1 完整实现 **需求分析** 阶段；v0.2 以 `/sfk-ui` 形式实现 **UI
     ├── sfk-code-review.md
     ├── sfk-test.md
     ├── sfk-deploy.md
-    └── sfk-export.md
+    ├── sfk-export.md
+    └── sfk-reset.md
 
 scripts/
 ├── sfk.py
@@ -153,7 +178,9 @@ scripts/
 ├── sfk-init.sh
 ├── sfk-status.sh
 ├── sfk-module.sh
-└── sfk-config.sh
+├── sfk-config.sh
+├── sfk-reset.sh
+└── sfk-wake.sh
 
 tests/
 └── test_sfk_cli.py
@@ -256,6 +283,11 @@ python scripts/sfk.py export module
 python scripts/sfk.py export module user-management --zip
 python scripts/sfk.py export project
 python scripts/sfk.py export project --zip
+python scripts/sfk.py reset impact
+python scripts/sfk.py reset apply --confirm 确认重置
+python scripts/sfk.py wake --prompt "sfk 在吗"
+python scripts/sfk.py wake --prompt "帮我做需求分析"
+python scripts/sfk.py wake --prompt "项目中的审批工作流需要加一段说明"
 python scripts/sfk.py tui select --title "选择方案" --mode single --option mvp="MVP 方案" --option full="完整方案"
 python scripts/sfk.py status
 ```
@@ -297,6 +329,8 @@ rm -rf .sfk docs/super-flow-kit
 - `/sfk-deploy` 草稿必须包含部署文档必备章节；确认时不得残留模板占位符。测试在部署阶段作为软依赖，但必须通过 `scripts/sfk.py deployment readiness` 检查所有模块是否有已确认且可用的测试产出物，并向用户提示风险。
 - `/sfk-deploy` 只确认部署文档，不代表真实部署已经执行，也不代表生产环境已经变更。
 - `/sfk-export` 是横向导出工具，不新增阶段状态，不写入 `.sfk` 状态；导出包只包含工作流交付文档、索引、风险清单、检查清单和 manifest，不包含业务源码或密钥。
+- `/sfk-reset` 是高风险状态重置工具，必须先通过 `scripts/sfk.py reset impact` 展示影响范围，再由用户单独输入完全一致的 `确认重置` 后才能执行 `reset apply`；默认不删除 `docs/super-flow-kit/` 产出物文档、导出包或业务源码。
+- `scripts/sfk.py wake` 和 `scripts/sfk-wake.sh` 是自然语言 hook 动态唤醒能力，只读取 prompt 和 `.sfk/index.json` 中的 `globalConfig`，命中时向 Claude 注入只读提示上下文；不会执行 `/sfk-status`、不会创建或修改 `.sfk`、不会执行重置。
 - `/sfk-req` 在写入草稿前会展示所有问题与用户选择，并提供确认、修改、回退、重选和取消分支。
 - `scripts/sfk.py tui select` 是无状态的通用交互选择能力；slash command 仍保留文本/编号选择作为兜底。
 

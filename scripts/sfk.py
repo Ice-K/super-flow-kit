@@ -20,6 +20,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+if hasattr(sys.stdin, "reconfigure"):
+    sys.stdin.reconfigure(encoding="utf-8")
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 if hasattr(sys.stderr, "reconfigure"):
@@ -63,6 +65,38 @@ DEFAULT_CONFIG = {
 }
 RESET_CONFIRM_PHRASE = "确认重置"
 RESET_SCOPES = {"current-module", "project"}
+WAKE_STATUS_INTENTS = {"在吗", "唤醒", "打开", "状态", "看板", "进度", "入口", "当前模块", "到哪"}
+WAKE_ACTION_WORDS = {"帮", "做", "生成", "进入", "开始", "制定", "创建", "写", "编写", "更新", "补充", "完善", "输出", "产出", "设计", "审查", "测试", "部署", "上线", "发布", "导出", "打包"}
+WAKE_RESET_WORDS = {"重置", "清空", "归零", "重新开始", "reset"}
+WAKE_RESET_TARGETS = {"工作流状态", "模块状态", "项目状态", "当前模块", "所有模块"}
+WAKE_STAGE_RULES = [
+    ("requirement", "/sfk-req", "需求分析", {"需求分析", "需求文档", "产品需求", "prd"}),
+    ("ui_design", "/sfk-ui", "UI 设计", {"ui 设计", "ui设计", "界面设计", "页面设计", "原型", "交互设计"}),
+    ("system_design", "/sfk-design", "系统设计", {"系统设计", "架构设计", "数据库设计", "接口设计", "api 设计", "api设计", "数据库和 api", "数据库和api"}),
+    ("development", "/sfk-dev", "软件开发", {"开发计划", "实现计划", "软件开发", "开发文档"}),
+    ("code_review", "/sfk-code-review", "代码审查", {"代码审查", "code review", "codereview", "review 代码", "审查代码"}),
+    ("testing", "/sfk-test", "功能测试", {"测试计划", "功能测试", "测试文档", "验收测试"}),
+    ("deployment", "/sfk-deploy", "部署上线", {"部署上线", "上线计划", "部署文档", "发布计划", "上线部署"}),
+    ("export", "/sfk-export", "交付包导出", {"交付包", "导出包", "导出项目", "导出模块"}),
+]
+COMMAND_HELP_ORDER = [
+    "/sfk",
+    "/sfk-help",
+    "/sfk-init",
+    "/sfk-status",
+    "/sfk-module",
+    "/sfk-config",
+    "/sfk-req",
+    "/sfk-ui",
+    "/sfk-design",
+    "/sfk-dev",
+    "/sfk-code-review",
+    "/sfk-test",
+    "/sfk-deploy",
+    "/sfk-export",
+    "/sfk-reset",
+]
+COMMAND_HELP_RANK = {command: index for index, command in enumerate(COMMAND_HELP_ORDER)}
 MODULE_ID_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$")
 SKIP_DISCOVERY_DIRS = {
     ".git",
@@ -315,6 +349,10 @@ def now_iso() -> str:
 
 def root() -> Path:
     return Path.cwd()
+
+
+def plugin_root() -> Path:
+    return Path(__file__).resolve().parents[1]
 
 
 def rel(path: Path) -> str:
@@ -888,6 +926,115 @@ def read_json(path: Path) -> dict[str, Any]:
 def write_json(path: Path, data: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def load_wake_config() -> dict[str, Any]:
+    cfg = DEFAULT_CONFIG.copy()
+    try:
+        data = read_json(index_path())
+    except SfkError:
+        return cfg
+    if data.get("schemaVersion") not in {None, SCHEMA_VERSION}:
+        return cfg
+    global_config = data.get("globalConfig")
+    if isinstance(global_config, dict):
+        for key in {"pluginName", "userName"}:
+            value = global_config.get(key)
+            if isinstance(value, str) and value.strip():
+                cfg[key] = value.strip()
+    return cfg
+
+
+def prompt_contains_any(prompt: str, words: set[str]) -> bool:
+    lowered = prompt.lower()
+    return any(word.lower() in lowered for word in words)
+
+
+def prompt_has_plugin_ref(prompt: str, plugin_name: str) -> bool:
+    lowered = prompt.lower()
+    refs = {"sfk", "super-flow-kit"}
+    if plugin_name.strip():
+        refs.add(plugin_name.strip().lower())
+    return any(ref and ref in lowered for ref in refs)
+
+
+def prompt_is_bare_plugin_ref(prompt: str, plugin_name: str) -> bool:
+    normalized = prompt.strip().strip(" ，,。.!！?？~～").lower()
+    refs = {"sfk", "super-flow-kit"}
+    if plugin_name.strip():
+        refs.add(plugin_name.strip().lower())
+    return normalized in refs
+
+
+def wake_context(message: str) -> dict[str, Any]:
+    return {
+        "hookSpecificOutput": {
+            "hookEventName": "UserPromptSubmit",
+            "additionalContext": message,
+        }
+    }
+
+
+def wake_message_for_prompt(prompt: str, cfg: dict[str, Any]) -> str | None:
+    stripped = prompt.strip()
+    if not stripped or stripped.startswith("/"):
+        return None
+
+    plugin_name = str(cfg.get("pluginName") or DEFAULT_CONFIG["pluginName"])
+    user_name = str(cfg.get("userName") or DEFAULT_CONFIG["userName"])
+    has_plugin_ref = prompt_has_plugin_ref(stripped, plugin_name)
+
+    if has_plugin_ref and (
+        prompt_contains_any(stripped, WAKE_STATUS_INTENTS) or prompt_is_bare_plugin_ref(stripped, plugin_name)
+    ):
+        return (
+            f"super-flow-kit 自然语言唤醒命中：用户称呼是 {user_name}，插件昵称是 {plugin_name}；"
+            f"用户可能想查看或唤醒 {plugin_name}。回复时请称呼用户为 {user_name}，不要把插件昵称 {plugin_name} 当作用户称呼。"
+            "本 hook 只读，未执行 /sfk-status；可建议用户输入 /sfk 查看入口，或输入 /sfk-status 查看当前看板。"
+        )
+
+    if prompt_contains_any(stripped, WAKE_RESET_WORDS) and (
+        has_plugin_ref or prompt_contains_any(stripped, WAKE_RESET_TARGETS)
+    ):
+        return (
+            f"super-flow-kit 自然语言唤醒命中：{user_name} 可能想重置工作流状态。"
+            "本 hook 只读，不会执行任何重置或写入；请引导用户使用 /sfk-reset current-module 或 /sfk-reset project "
+            "先查看影响范围，并严格遵循命令内二次确认流程。"
+        )
+
+    has_action = prompt_contains_any(stripped, WAKE_ACTION_WORDS)
+    for _phase, command, phase_name, keywords in WAKE_STAGE_RULES:
+        if prompt_contains_any(stripped, keywords) and (has_plugin_ref or has_action):
+            return (
+                f"super-flow-kit 自然语言唤醒命中：{user_name} 可能要进入{phase_name}流程。"
+                f"本 hook 只读，未执行任何命令；可建议用户使用 {command} 继续完整 slash command 流程。"
+            )
+
+    return None
+
+
+def wake_prompt_from_hook_stdin() -> str | None:
+    try:
+        raw = sys.stdin.read()
+        data = json.loads(raw) if raw.strip() else {}
+    except (OSError, json.JSONDecodeError):
+        return None
+    if data.get("hook_event_name") not in {None, "UserPromptSubmit"}:
+        return None
+    prompt = data.get("prompt")
+    return prompt if isinstance(prompt, str) else None
+
+
+def wake(args: argparse.Namespace) -> None:
+    prompt = args.prompt
+    if args.hook_json:
+        prompt = wake_prompt_from_hook_stdin()
+    if not prompt:
+        return
+    message = wake_message_for_prompt(prompt, load_wake_config())
+    if not message:
+        return
+    print(json.dumps(wake_context(message), ensure_ascii=False))
 
 
 def require_index() -> dict[str, Any]:
@@ -2468,6 +2615,103 @@ def export_project(args: argparse.Namespace) -> None:
     print(f"riskCount：{result['riskCount']}")
 
 
+def command_help_sort_key(entry: dict[str, str]) -> tuple[int, str]:
+    command = entry["command"]
+    return (COMMAND_HELP_RANK.get(command, len(COMMAND_HELP_ORDER)), command)
+
+
+def parse_command_frontmatter(path: Path) -> dict[str, str]:
+    lines = path.read_text(encoding="utf-8").splitlines()
+    if not lines or lines[0].strip() != "---":
+        return {}
+    meta: dict[str, str] = {}
+    for line in lines[1:]:
+        if line.strip() == "---":
+            break
+        if ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        meta[key.strip()] = value.strip().strip('"').strip("'")
+    return meta
+
+
+def load_command_help_entries() -> list[dict[str, str]]:
+    commands_dir = plugin_root() / ".claude" / "commands"
+    if not commands_dir.exists():
+        raise SfkError("未找到 .claude/commands 目录，无法读取 super-flow-kit 命令说明。")
+    entries: list[dict[str, str]] = []
+    for path in sorted(commands_dir.glob("sfk*.md")):
+        meta = parse_command_frontmatter(path)
+        command = f"/{path.stem}"
+        entries.append(
+            {
+                "command": command,
+                "description": meta.get("description", ""),
+                "argumentHint": meta.get("argument-hint", ""),
+                "path": path.relative_to(plugin_root()).as_posix(),
+            }
+        )
+    return sorted(entries, key=command_help_sort_key)
+
+
+def normalize_command_help_query(query: str) -> str:
+    value = query.strip().lower()
+    for marker in ("/sfk", "\\sfk"):
+        index = value.find(marker)
+        if index > 0:
+            return value[index:].replace("\\", "/")
+    return value
+
+
+def command_help_matches(entry: dict[str, str], query: str) -> bool:
+    lowered = normalize_command_help_query(query)
+    if not lowered:
+        return True
+    command = entry["command"].lower()
+    candidates = [
+        command,
+        command.lstrip("/"),
+        entry["description"].lower(),
+        entry["argumentHint"].lower(),
+    ]
+    return any(lowered in candidate for candidate in candidates)
+
+
+def print_command_help_entry(entry: dict[str, str]) -> None:
+    hint = entry["argumentHint"]
+    usage = entry["command"] + (f" {hint}" if hint else "")
+    print(entry["command"])
+    print(f"  说明：{entry['description'] or '暂无说明'}")
+    print(f"  用法：{usage}")
+    print(f"  文档：{entry['path']}")
+
+
+def command_help(args: argparse.Namespace) -> None:
+    query = " ".join(args.query).strip()
+    entries = load_command_help_entries()
+    if query:
+        matches = [entry for entry in entries if command_help_matches(entry, query)]
+        if not matches:
+            print(f"未找到匹配命令：{query}")
+            print("可使用 /sfk-help 查看全部 super-flow-kit 指令。")
+            return
+        print(f"super-flow-kit 命令帮助：{query}")
+        for index, entry in enumerate(matches):
+            if index:
+                print()
+            print_command_help_entry(entry)
+        return
+
+    print("super-flow-kit 命令帮助")
+    print("可用指令：")
+    for entry in entries:
+        hint = entry["argumentHint"]
+        usage = entry["command"] + (f" {hint}" if hint else "")
+        print(f"- {usage} — {entry['description'] or '暂无说明'}")
+    print()
+    print("使用 /sfk-help <命令名|关键词> 查看指定指令，例如：/sfk-help sfk-status、/sfk-help 导出。")
+
+
 def tui_select(args: argparse.Namespace) -> None:
     import sfk_tui
 
@@ -2486,6 +2730,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_status = sub.add_parser("status")
     p_status.set_defaults(func=render_status)
+
+    p_help = sub.add_parser("help")
+    p_help.add_argument("query", nargs="*")
+    p_help.set_defaults(func=command_help)
+
+    p_wake = sub.add_parser("wake")
+    wake_input = p_wake.add_mutually_exclusive_group(required=True)
+    wake_input.add_argument("--prompt")
+    wake_input.add_argument("--hook-json", action="store_true")
+    p_wake.set_defaults(func=wake)
 
     p_module = sub.add_parser("module")
     module_sub = p_module.add_subparsers(dest="module_command", required=True)

@@ -48,6 +48,26 @@ def run_sfk(project_dir: Path, *args: str, check: bool = True, env: dict[str, st
     return result
 
 
+def run_sfk_input(project_dir: Path, input_text: str, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+    result = subprocess.run(
+        [sys.executable, str(SFK_SCRIPT), *args],
+        cwd=project_dir,
+        input=input_text,
+        text=True,
+        encoding="utf-8",
+        capture_output=True,
+        check=False,
+    )
+    if check and result.returncode != 0:
+        raise AssertionError(
+            f"sfk command failed: {' '.join(args)}\n"
+            f"returncode: {result.returncode}\n"
+            f"stdout:\n{result.stdout}\n"
+            f"stderr:\n{result.stderr}"
+        )
+    return result
+
+
 def load_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
@@ -420,6 +440,160 @@ class SfkCliTests(unittest.TestCase):
             self.assertIsNone(artifact["confirmedAt"], phase)
             self.assertIsNone(artifact["owner"], phase)
         self.assertEqual(state["artifacts"]["development"]["implementationApproval"]["status"], "pending")
+
+    def wake_context(self, result: subprocess.CompletedProcess[str]) -> str:
+        payload = json.loads(result.stdout)
+        return payload["hookSpecificOutput"]["additionalContext"]
+
+    def test_help_lists_commands_without_initializing_project(self) -> None:
+        with self.make_project() as tmp:
+            project_dir = Path(tmp)
+
+            result = run_sfk(project_dir, "help")
+
+            self.assertIn("super-flow-kit 命令帮助", result.stdout)
+            self.assertIn("/sfk-help", result.stdout)
+            self.assertIn("查询 super-flow-kit 指令和说明", result.stdout)
+            self.assertIn("/sfk-status", result.stdout)
+            self.assertIn("查看 super-flow-kit 工作流看板", result.stdout)
+            self.assertIn("/sfk-module", result.stdout)
+            self.assertIn("/sfk-export", result.stdout)
+            self.assertIn("/sfk-reset", result.stdout)
+            self.assertFalse((project_dir / ".sfk").exists())
+
+    def test_help_filters_by_command_name_or_keyword(self) -> None:
+        with self.make_project() as tmp:
+            project_dir = Path(tmp)
+
+            bare = run_sfk(project_dir, "help", "sfk-status")
+            self.assertIn("/sfk-status", bare.stdout)
+            self.assertIn("查看 super-flow-kit 工作流看板", bare.stdout)
+
+            slash = run_sfk(project_dir, "help", "/sfk-status")
+            self.assertIn("/sfk-status", slash.stdout)
+            self.assertIn("查看 super-flow-kit 工作流看板", slash.stdout)
+
+            git_bash_path = run_sfk(project_dir, "help", "E:/Program Files/Git/sfk-status")
+            self.assertIn("/sfk-status", git_bash_path.stdout)
+            self.assertIn("查看 super-flow-kit 工作流看板", git_bash_path.stdout)
+
+            keyword = run_sfk(project_dir, "help", "导出")
+            self.assertIn("/sfk-export", keyword.stdout)
+            self.assertIn("导出 super-flow-kit 交付包", keyword.stdout)
+
+            missing = run_sfk(project_dir, "help", "does-not-exist")
+            self.assertEqual(missing.returncode, 0)
+            self.assertIn("未找到匹配命令", missing.stdout)
+            self.assertIn("/sfk-help", missing.stdout)
+
+    def test_wake_uses_default_config_without_initializing_project(self) -> None:
+        with self.make_project() as tmp:
+            project_dir = Path(tmp)
+
+            result = run_sfk(project_dir, "wake", "--prompt", "sfk 在吗")
+
+            context = self.wake_context(result)
+            self.assertIn("小主", context)
+            self.assertIn("sfk", context)
+            self.assertIn("/sfk-status", context)
+            self.assertFalse((project_dir / ".sfk").exists())
+
+    def test_wake_reads_config_and_keeps_state_read_only(self) -> None:
+        with self.make_project() as tmp:
+            project_dir = Path(tmp)
+            self.init_project(project_dir)
+            self.create_module(project_dir)
+            run_sfk(project_dir, "config", "set", "pluginName", "flow")
+            run_sfk(project_dir, "config", "set", "userName", "阿杰")
+            index_path = project_dir / ".sfk" / "index.json"
+            state_path = project_dir / ".sfk" / "modules" / MODULE_ID / "state.json"
+            before_index = index_path.read_text(encoding="utf-8")
+            before_state = state_path.read_text(encoding="utf-8")
+
+            result = run_sfk(project_dir, "wake", "--prompt", "flow 在吗")
+
+            context = self.wake_context(result)
+            self.assertIn("用户称呼是 阿杰", context)
+            self.assertIn("插件昵称是 flow", context)
+            self.assertIn("不要把插件昵称 flow 当作用户称呼", context)
+            self.assertEqual(index_path.read_text(encoding="utf-8"), before_index)
+            self.assertEqual(state_path.read_text(encoding="utf-8"), before_state)
+
+    def test_wake_bare_plugin_name_keeps_user_name_distinct_from_plugin_name(self) -> None:
+        with self.make_project() as tmp:
+            project_dir = Path(tmp)
+            self.init_project(project_dir)
+            run_sfk(project_dir, "config", "set", "pluginName", "大雷")
+            run_sfk(project_dir, "config", "set", "userName", "小主")
+
+            result = run_sfk(project_dir, "wake", "--prompt", "大雷")
+
+            context = self.wake_context(result)
+            self.assertIn("用户称呼是 小主", context)
+            self.assertIn("插件昵称是 大雷", context)
+            self.assertIn("不要把插件昵称 大雷 当作用户称呼", context)
+            self.assertIn("/sfk-status", context)
+
+    def test_wake_noops_for_slash_and_unrelated_business_language(self) -> None:
+        with self.make_project() as tmp:
+            project_dir = Path(tmp)
+
+            self.assertEqual(run_sfk(project_dir, "wake", "--prompt", "/sfk-status").stdout, "")
+            self.assertEqual(run_sfk(project_dir, "wake", "--prompt", "   /sfk-reset project").stdout, "")
+            self.assertEqual(run_sfk(project_dir, "wake", "--prompt", "项目中的审批工作流需要加一段说明").stdout, "")
+            self.assertEqual(run_sfk(project_dir, "wake", "--prompt", "上传文件时应该显示进度条").stdout, "")
+
+    def test_wake_suggests_stage_commands_only_for_clear_stage_intent(self) -> None:
+        with self.make_project() as tmp:
+            project_dir = Path(tmp)
+
+            cases = [
+                ("帮我做需求分析", "/sfk-req"),
+                ("生成系统设计文档", "/sfk-design"),
+                ("进入代码审查阶段", "/sfk-code-review"),
+                ("制定功能测试计划", "/sfk-test"),
+                ("生成部署上线计划", "/sfk-deploy"),
+                ("导出交付包", "/sfk-export"),
+            ]
+            for prompt, command in cases:
+                with self.subTest(prompt=prompt):
+                    context = self.wake_context(run_sfk(project_dir, "wake", "--prompt", prompt))
+                    self.assertIn(command, context)
+                    self.assertIn("未执行任何命令", context)
+
+    def test_wake_reset_language_is_read_only_even_with_confirmation_phrase(self) -> None:
+        with self.make_project() as tmp:
+            project_dir = Path(tmp)
+            self.init_project(project_dir)
+            self.create_module(project_dir)
+            index_path = project_dir / ".sfk" / "index.json"
+            state_path = project_dir / ".sfk" / "modules" / MODULE_ID / "state.json"
+            before_index = index_path.read_text(encoding="utf-8")
+            before_state = state_path.read_text(encoding="utf-8")
+
+            result = run_sfk(project_dir, "wake", "--prompt", "重置当前模块，确认重置")
+
+            context = self.wake_context(result)
+            self.assertIn("/sfk-reset", context)
+            self.assertIn("不会执行任何重置", context)
+            self.assertEqual(index_path.read_text(encoding="utf-8"), before_index)
+            self.assertEqual(state_path.read_text(encoding="utf-8"), before_state)
+
+    def test_wake_hook_json_reads_prompt_and_tolerates_invalid_input(self) -> None:
+        with self.make_project() as tmp:
+            project_dir = Path(tmp)
+            payload = json.dumps({"hook_event_name": "UserPromptSubmit", "prompt": "sfk 在吗"}, ensure_ascii=False)
+
+            result = run_sfk_input(project_dir, payload, "wake", "--hook-json")
+            context = self.wake_context(result)
+            self.assertIn("/sfk-status", context)
+
+            invalid = run_sfk_input(project_dir, "{not json", "wake", "--hook-json")
+            self.assertEqual(invalid.returncode, 0)
+            self.assertEqual(invalid.stdout, "")
+            missing = run_sfk_input(project_dir, json.dumps({"hook_event_name": "UserPromptSubmit"}), "wake", "--hook-json")
+            self.assertEqual(missing.returncode, 0)
+            self.assertEqual(missing.stdout, "")
 
     def test_mvp_state_lifecycle(self) -> None:
         with self.make_project() as tmp:
@@ -2331,6 +2505,7 @@ class SfkCliTests(unittest.TestCase):
 
     def test_command_docs_do_not_use_fixed_custom_options(self) -> None:
         command_paths = [
+            REPO_ROOT / ".claude" / "commands" / "sfk-help.md",
             REPO_ROOT / ".claude" / "commands" / "sfk-req.md",
             REPO_ROOT / ".claude" / "commands" / "sfk-ui.md",
             REPO_ROOT / ".claude" / "commands" / "sfk-design.md",
@@ -2350,6 +2525,9 @@ class SfkCliTests(unittest.TestCase):
             for line in path.read_text(encoding="utf-8").splitlines():
                 for pattern in forbidden_line_patterns:
                     self.assertIsNone(pattern.search(line), f"{path}: {line}")
+        help_doc = (REPO_ROOT / ".claude" / "commands" / "sfk-help.md").read_text(encoding="utf-8")
+        self.assertIn("scripts/sfk.py help", help_doc)
+        self.assertIn("只读", help_doc)
         dev_doc = (REPO_ROOT / ".claude" / "commands" / "sfk-dev.md").read_text(encoding="utf-8")
         self.assertIn("implementation approve development", dev_doc)
         self.assertIn("Gate C", dev_doc)

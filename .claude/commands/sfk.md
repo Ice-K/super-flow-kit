@@ -16,6 +16,7 @@ argument-hint: "[操作]"
 4. 如果项目已初始化但没有模块，提示用户执行 `/sfk-module create <名称>`；创建模块时 sfk 会在交互中推荐 `moduleId`，无法可靠推荐时再提示补充 `--id`。
 5. 如果已有当前模块，优先沿用状态脚本输出的下一步建议；需要补充菜单时按阶段给出：
    - `/sfk-status`
+   - `/sfk-help [命令名|关键词]`
    - `/sfk-module status`
    - `/sfk-req <需求描述>`
    - `/sfk-ui <UI 目标>`

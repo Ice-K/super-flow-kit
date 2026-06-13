@@ -600,6 +600,7 @@ super-flow-kit/
 ├── .claude/
 │   ├── commands/
 │   │   ├── sfk.md
+│   │   ├── sfk-help.md
 │   │   ├── sfk-init.md
 │   │   ├── sfk-status.md
 │   │   ├── sfk-module.md
@@ -631,6 +632,7 @@ v0.1 可以先实现最少文件：
 
 ```text
 .claude/commands/sfk.md
+.claude/commands/sfk-help.md
 .claude/commands/sfk-init.md
 .claude/commands/sfk-status.md
 .claude/commands/sfk-module.md
@@ -651,6 +653,7 @@ MVP 命令职责：
 | 命令文件                         | 用户命令          | 职责                                 |
 | -------------------------------- | ----------------- | ------------------------------------ |
 | `.claude/commands/sfk.md`        | `/sfk`            | 主入口，读取状态并展示下一步菜单。   |
+| `.claude/commands/sfk-help.md`   | `/sfk-help ...`   | 只读查询插件指令清单和说明。         |
 | `.claude/commands/sfk-init.md`   | `/sfk-init`       | 初始化 `.sfk/` 和产出物目录。        |
 | `.claude/commands/sfk-status.md` | `/sfk-status`     | 渲染项目和模块看板。                 |
 | `.claude/commands/sfk-module.md` | `/sfk-module ...` | 管理模块 create/list/switch/status。 |
@@ -2891,6 +2894,7 @@ v0.1 可以只保留字段，不实现完整人员管理。后续版本可扩展
 | 命令                        | 当前状态    | 说明                                 |
 | --------------------------- | ----------- | ------------------------------------ |
 | `/sfk`                      | 已实现      | 唤醒插件并显示当前状态和下一步建议。 |
+| `/sfk-help`                 | 已实现      | 只读查询插件指令清单和指令说明。     |
 | `/sfk-init`                 | 已实现      | 初始化项目工作流状态。               |
 | `/sfk-status`               | 已实现      | 查看项目和当前模块看板。             |
 | `/sfk-module create <名称>` | 已实现      | 创建模块。                           |
